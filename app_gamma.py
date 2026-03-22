@@ -533,7 +533,7 @@ with tabs[0]:
                 base = tmp.ffill().bfill().iloc[0]
                 tmp = tmp.divide(base) * 100
 
-            st.line_chart(tmp, use_container_width=True)
+            st.line_chart(tmp, width='stretch')
 
             st.markdown("#### Desempeño comparativo (últimos 3 años, retornos mensuales)")
             wide_m = wide.resample("M").last()
@@ -549,7 +549,7 @@ with tabs[0]:
                     "Vol anual (%)": rets_m.std() * np.sqrt(ann) * 100,
                     "Sharpe (rf=0)": rets_m.mean() / rets_m.std()
                 }).round(2).dropna()
-                st.dataframe(perf, use_container_width=True)
+                st.dataframe(perf, width='stretch')
 
 # ---------- TAB 2 ----------
 with tabs[1]:
@@ -568,18 +568,25 @@ with tabs[1]:
                 fig = go.Figure()
                 fig.add_scatter(x=y.index, y=y.values, mode="lines", name="Precio")
                 fig.update_layout(title=f"{t} • Precio ajustado", xaxis_title="Fecha", yaxis_title="Precio")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             with c2:
                 ret_1d = y.pct_change().dropna() * 100
                 st.markdown("**Resumen**")
-                st.write(pd.Series({
+                resumen = pd.Series({
                     "Observaciones": int(y.shape[0]),
                     "Inicio": y.index.min(),
                     "Fin": y.index.max(),
                     "Media precio": float(y.mean()),
                     "Desv. est. precio": float(y.std()),
                     "Retorno medio 1p (%)": float(ret_1d.mean()) if len(ret_1d) else np.nan,
-                }).round(4))
+                }, dtype=object)
+                resumen.loc[["Media precio", "Desv. est. precio", "Retorno medio 1p (%)"]] = (
+                    pd.to_numeric(
+                        resumen.loc[["Media precio", "Desv. est. precio", "Retorno medio 1p (%)"]],
+                        errors="coerce"
+                    ).round(4)
+                )
+                st.write(resumen)
             feats = dt.copy()
             feats["RSI-28"] = calc_rsi(feats["adj_close"], 28)
             feats["BB_pct"] = calc_bb_pct(feats["adj_close"], 20)
@@ -590,7 +597,7 @@ with tabs[1]:
                 x="date", y="value", color="variable",
                 title="Indicadores del pipeline Gamma"
             )
-            st.plotly_chart(fig2, use_container_width=True)
+            st.plotly_chart(fig2, width='stretch')
 
 # ---------- TAB 3 ----------
 with tabs[2]:
@@ -635,7 +642,7 @@ with tabs[2]:
 
             st.markdown("#### Métricas de error del precio proyectado")
             err_df = pd.DataFrame([res["err_metrics"]]).round(4)
-            st.dataframe(err_df, use_container_width=True)
+            st.dataframe(err_df, width='stretch')
             st.info(explain_error_metrics(res["err_metrics"]))
 
             df_curve = pd.DataFrame({
@@ -652,7 +659,7 @@ with tabs[2]:
                 x="Fecha", y="Retorno %", color="Serie",
                 title="Retorno acumulado walk-forward"
             )
-            st.plotly_chart(fig_curve, use_container_width=True)
+            st.plotly_chart(fig_curve, width='stretch')
 
             df_price = pd.DataFrame({
                 "Fecha": pd.to_datetime(res["dates"]),
@@ -665,7 +672,7 @@ with tabs[2]:
                 x="Fecha", y="Precio", color="Serie",
                 title="Precio real vs precio predicho"
             )
-            st.plotly_chart(fig_price, use_container_width=True)
+            st.plotly_chart(fig_price, width='stretch')
 
             cls_df = pd.DataFrame({
                 "Fecha": pd.to_datetime(res["dates"]),
@@ -676,7 +683,7 @@ with tabs[2]:
                 "Pipeline final": res["pred_F"],
             })
             st.markdown("#### Clasificaciones direccionales (1=sube, 0=baja)")
-            st.dataframe(cls_df.tail(20), use_container_width=True)
+            st.dataframe(cls_df.tail(20), width='stretch')
 
 # ---------- TAB 4 ----------
 with tabs[3]:
@@ -732,11 +739,11 @@ with tabs[3]:
             st.warning("No se pudo generar el ranking con los parámetros actuales.")
         else:
             rank = pd.DataFrame(results).sort_values("score", ascending=False).reset_index(drop=True)
-            st.dataframe(rank, use_container_width=True)
+            st.dataframe(rank, width='stretch')
 
             top5 = rank.head(5)
             st.markdown("### Top 5")
-            st.dataframe(top5, use_container_width=True)
+            st.dataframe(top5, width='stretch')
 
             fig_top = go.Figure()
             fig_top.add_bar(x=top5["ticker"], y=top5["hit_rate_final (%)"], name="Hit Rate final (%)")
@@ -747,4 +754,4 @@ with tabs[3]:
                 xaxis_title="Ticker",
                 yaxis_title="Valor"
             )
-            st.plotly_chart(fig_top, use_container_width=True)
+            st.plotly_chart(fig_top, width='stretch')
