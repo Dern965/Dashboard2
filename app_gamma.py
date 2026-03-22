@@ -755,3 +755,4 @@ with tabs[3]:
                 yaxis_title="Valor"
             )
             st.plotly_chart(fig_top, width='stretch')
+print("hola")
