@@ -43,9 +43,6 @@ Instala las dependencias del proyecto con:
 ```bash
 pip install -r requirements.txt
 ```
-
-Asegúrate de que el archivo `requirements.txt` corresponda a la versión actual del proyecto basada en **Gamma**.
-
 ---
 
 ## 🚀 Ejecución
@@ -59,7 +56,7 @@ datos/market_prices.csv
 2. Ejecuta la aplicación con:
 
 ```bash
-streamlit run app.py
+streamlit run app_gamma.py
 ```
 
 3. Streamlit abrirá la app en el navegador en:
@@ -191,7 +188,7 @@ El sistema ahora se basa en el modelo **Gamma**, diseñado para generar predicci
 
 ```txt
 .
-├── app.py
+├── app_gamma.py
 ├── requirements.txt
 ├── README.md
 └── datos/
@@ -199,13 +196,3 @@ El sistema ahora se basa en el modelo **Gamma**, diseñado para generar predicci
 ```
 
 ---
-
-## 🧰 Mantenimiento
-
-Si actualizas los datos o haces cambios grandes en la lógica de la app, puedes limpiar la caché de Streamlit con:
-
-```bash
-streamlit cache clear
-```
-
-También puedes revisar el código fuente para ajustar parámetros internos del flujo Gamma si más adelante deseas modificar la lógica del modelo o el criterio de ranking.
