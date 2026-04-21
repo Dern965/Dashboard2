@@ -1185,9 +1185,21 @@ with tabs[2]:
                 f"{estado_color(res['current_signal'])} Señal actual: {res['current_signal']} | "
                 f"Confianza: {confianza_texto(res['current_conf'])}"
             )
+            hoy_real = pd.Timestamp.today().normalize()
+            desfase_bursatil = len(pd.bdate_range(res['current_date'].normalize(), hoy_real)) - 1
+
             st.caption(
-                f"Fecha actual: {res['current_date'].date()} | Fecha estimada: {res['target_date'].date()} | {res['override_txt']}"
+                f"Fecha de hoy: {hoy_real.date()} | "
+                f"Última fecha con datos: {res['current_date'].date()} | "
+                f"Fecha objetivo estimada: {res['target_date'].date()} | "
+                f"{res['override_txt']}"
             )
+
+            if desfase_bursatil > 3:
+                st.warning(
+                    f"Tus datos parecen estar atrasados {desfase_bursatil} días hábiles. "
+                    "Conviene actualizar market_prices.csv para que el pronóstico use información más reciente."
+                )
 
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("Señal", res["current_signal"])
