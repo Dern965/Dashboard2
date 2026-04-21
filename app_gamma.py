@@ -317,6 +317,46 @@ def build_features_for_ticker(df_t, horizon=10, paso=10, warm=210, n_lags_morph=
     }
 
 
+def build_current_feature_for_ticker(df_t, n_lags_morph=5):
+    df = df_t.sort_values("date").reset_index(drop=True).copy()
+    if len(df) < max(40, n_lags_morph + 30):
+        return None
+
+    df["ret_1d"] = df["adj_close"].pct_change(1) * 100
+    df["high_low_pct"] = (df["high"] - df["low"]) / df["adj_close"].replace(0, np.nan) * 100
+    df["vol_real"] = df["ret_1d"].rolling(10).std().fillna(0)
+    df["day_of_week"] = pd.to_datetime(df["date"]).dt.dayofweek.astype(float) / 4.0
+    df["bb_pct"] = calc_bb_pct(df["adj_close"], 20)
+    df["rsi_28"] = calc_rsi(df["adj_close"], 28)
+    df["ret_5d"] = df["adj_close"].pct_change(5) * 100
+    df["vol_ratio_5"] = calc_vol_ratio(df["volume"], 5)
+    df["month_num"] = pd.to_datetime(df["date"]).dt.month
+    df = df.replace([np.inf, -np.inf], np.nan)
+
+    contexto = ["high_low_pct", "vol_real", "day_of_week", "bb_pct", "rsi_28", "ret_5d", "vol_ratio_5"]
+
+    for idx in range(len(df) - 1, n_lags_morph - 1, -1):
+        morph = df["ret_1d"].iloc[idx - n_lags_morph: idx]
+        if len(morph) != n_lags_morph or morph.isna().any():
+            continue
+        if df.loc[idx, contexto + ["month_num", "rsi_28", "adj_close", "date"]].isna().any():
+            continue
+
+        x_cur = np.array(
+            list(morph.astype(float).values) + [float(df.loc[idx, f]) for f in contexto],
+            dtype=np.float64,
+        )
+        return {
+            "X": x_cur,
+            "current_date": pd.to_datetime(df.loc[idx, "date"]),
+            "current_price": float(df.loc[idx, "adj_close"]),
+            "current_month": int(df.loc[idx, "month_num"]),
+            "current_rsi": float(df.loc[idx, "rsi_28"]),
+        }
+
+    return None
+
+
 def robust_scale_train_test(X, split_idx):
     p2 = np.percentile(X[:split_idx], 2, axis=0)
     p98 = np.percentile(X[:split_idx], 98, axis=0)
@@ -326,6 +366,21 @@ def robust_scale_train_test(X, split_idx):
     Xs[:split_idx] = np.clip(Xs[:split_idx], 0, 1)
     Xs[split_idx:] = np.clip(Xs[split_idx:], 0, 1)
     return Xs
+
+
+def robust_scale_fit_full(X):
+    p2 = np.percentile(X, 2, axis=0)
+    p98 = np.percentile(X, 98, axis=0)
+    denom = np.where((p98 - p2) == 0, 1.0, (p98 - p2))
+    Xc = np.clip(X, p2, p98)
+    Xs = np.clip((Xc - p2) / denom, 0, 1)
+    return Xs, p2, p98, denom
+
+
+def robust_scale_apply(X_new, p2, p98, denom):
+    X_new = np.asarray(X_new, dtype=np.float64)
+    Xc = np.clip(X_new, p2, p98)
+    return np.clip((Xc - p2) / denom, 0, 1)
 
 
 @st.cache_data(show_spinner=False)
@@ -442,12 +497,19 @@ def run_gamma_backtest_for_ticker(df_t, horizon, paso, n_test, precisions, roll_
     px_pr = np.array(wf_px_pred, dtype=float)
     err_metrics = compute_error_metrics(px_rl, px_pr)
 
-    clf_fa = GammaBinary(pA).fit(X_sc, y)
-    clf_fb = GammaBinary(pB).fit(X_sc, y)
-    clf_fc = GammaBinary(pC).fit(X_sc, y)
-    ra_f = clf_fa.predict_with_score([X_sc[-1]])[0]
-    rb_f = clf_fb.predict_with_score([X_sc[-1]])[0]
-    rc_f = clf_fc.predict_with_score([X_sc[-1]])[0]
+    current_pack = build_current_feature_for_ticker(df_t, n_lags_morph=n_lags_morph)
+    if current_pack is None:
+        return None
+
+    X_full_sc, p2_full, p98_full, denom_full = robust_scale_fit_full(X)
+    x_current_sc = robust_scale_apply(current_pack["X"], p2_full, p98_full, denom_full).reshape(1, -1)
+
+    clf_fa = GammaBinary(pA).fit(X_full_sc, y)
+    clf_fb = GammaBinary(pB).fit(X_full_sc, y)
+    clf_fc = GammaBinary(pC).fit(X_full_sc, y)
+    ra_f = clf_fa.predict_with_score(x_current_sc)[0]
+    rb_f = clf_fb.predict_with_score(x_current_sc)[0]
+    rc_f = clf_fc.predict_with_score(x_current_sc)[0]
 
     w_a_f = max(np.mean(roll_correct_A[-roll_acc_win:]), 0.1) if len(roll_correct_A) else 1.0
     w_b_f = max(np.mean(roll_correct_B[-roll_acc_win:]), 0.1) if len(roll_correct_B) else 1.0
@@ -458,7 +520,7 @@ def run_gamma_backtest_for_ticker(df_t, horizon, paso, n_test, precisions, roll_
     vf[rb_f[0]] += w_b_f * (1 + rb_f[1])
     vf[rc_f[0]] += w_c_f * (1 + rc_f[1])
 
-    mes_hoy = int(months[-1])
+    mes_hoy = int(current_pack["current_month"])
     prior_hoy = SEASONAL_PRIOR.get(mes_hoy, 0.0)
     vf[1] += prior_hoy
     vf[0] -= prior_hoy
@@ -466,7 +528,7 @@ def run_gamma_backtest_for_ticker(df_t, horizon, paso, n_test, precisions, roll_
     ens_f = 1 if vf[1] >= vf[0] else 0
     conf_f = abs(vf[1] - vf[0]) / (vf[1] + vf[0] + 1e-9)
 
-    rsi_hoy = float(rsi_arr[-1])
+    rsi_hoy = float(current_pack["current_rsi"])
     override_txt = f"RSI-28 = {rsi_hoy:.1f} (zona normal)"
     if rsi_hoy < rsi_sell:
         ens_f = 0
@@ -475,8 +537,8 @@ def run_gamma_backtest_for_ticker(df_t, horizon, paso, n_test, precisions, roll_
         ens_f = 1
         override_txt = f"RSI alto: {rsi_hoy:.1f} > {rsi_buy}"
 
-    precio_hoy = float(px_signal[-1])
-    fecha_hoy = pd.to_datetime(fechas[-1])
+    precio_hoy = float(current_pack["current_price"])
+    fecha_hoy = pd.to_datetime(current_pack["current_date"])
     fecha_t = fecha_hoy + pd.offsets.BDay(horizon)
 
     ret_esp = (
@@ -1091,6 +1153,7 @@ if profile_submit:
     st.session_state["horizonte_valor"] = horizonte_valor
     st.session_state["tolerancia_riesgo"] = tolerancia_riesgo
     st.session_state["objetivo_inversion"] = objetivo_inversion
+    st.rerun()
 
 selected_horizon_days = horizon_to_business_days(st.session_state["horizonte_valor"])
 selected_horizon_label = human_horizon_label(st.session_state["horizonte_valor"])
@@ -1170,7 +1233,7 @@ scan_params = dict(
     n_lags_morph=int(n_lags_morph),
 )
 
-with st.spinner("Analizando el mercado... (solo la primera vez, después es instantáneo)"):
+with st.spinner("Analizando el mercado... (solo la primera vez, después es mas rápido)"):
     market_scan = scan_market(**scan_params)
 
 # ===================== TABS =====================
