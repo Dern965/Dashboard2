@@ -11,6 +11,8 @@ import plotly.graph_objects as go
 import streamlit as st
 from joblib import Parallel, delayed
 
+MAX_SCAN_JOBS = max(1, min(2, (os.cpu_count() or 1)))
+
 # ===================== CONFIG PÁGINA =====================
 st.set_page_config(page_title="Estrategias de inversión personalizadas", layout="wide")
 
@@ -811,7 +813,7 @@ def _process_one_ticker(ticker, df_rs, horizon, paso, n_test, precisions,
 def scan_market(df_rs, tickers_all, horizon, paso, n_test, precisions, roll_acc_win,
                 rsi_sell, rsi_buy, conf_min, warm, n_lags_morph):
 
-    rows = Parallel(n_jobs=-1, prefer="threads")(
+    rows = Parallel(n_jobs=MAX_SCAN_JOBS, prefer="threads")(
         delayed(_process_one_ticker)(
             ticker, df_rs, horizon, paso, n_test, precisions,
             roll_acc_win, rsi_sell, rsi_buy, conf_min, warm, n_lags_morph
@@ -1215,9 +1217,7 @@ help_box(
     "🟡 ESPERAR = no hay suficiente claridad para tomar una dirección."
 )
 
-# ===================== OPTIMIZACIÓN: scan_market UNA SOLA VEZ =====================
-# Se calcula ANTES de los tabs para que Comparativo y Cartera lo compartan
-# sin ejecutarlo dos veces en la primera carga.
+# ===================== NAVEGACIÓN Y CARGA DIFERIDA =====================
 scan_params = dict(
     df_rs=df_rs,
     tickers_all=tuple(tickers_all),
@@ -1233,14 +1233,21 @@ scan_params = dict(
     n_lags_morph=int(n_lags_morph),
 )
 
-with st.spinner("Analizando el mercado... (solo tarda mucho la primera vez, después es mas rápido)"):
-    market_scan = scan_market(**scan_params)
+view = st.segmented_control(
+    "Sección",
+    options=["Vista general", "Entender una emisora", "Pronóstico", "Comparativo", "Mi perfil y cartera"],
+    default="Vista general",
+    selection_mode="single",
+)
 
-# ===================== TABS =====================
-tabs = st.tabs(["Vista general", "Entender una emisora", "Pronóstico", "Comparativo", "Mi perfil y cartera"])
+market_scan = pd.DataFrame()
+needs_market_scan = view in ["Comparativo", "Mi perfil y cartera"]
+if needs_market_scan:
+    with st.spinner("Analizando el mercado... (solo tarda mucho la primera vez, después es mas rápido)"):
+        market_scan = scan_market(**scan_params)
 
 # ---------- TAB 1 ----------
-with tabs[0]:
+if view == "Vista general":
     st.subheader("Vista general de precios")
     st.caption("Aquí puedes comparar cómo se han movido una o varias emisoras en el tiempo.")
 
@@ -1293,7 +1300,7 @@ with tabs[0]:
                 )
 
 # ---------- TAB 2 ----------
-with tabs[1]:
+elif view == "Entender una emisora":
     st.subheader("Entender una emisora")
     st.caption("Esta sección sirve para ver una sola emisora con más detalle, incluyendo su volatilidad reciente.")
 
@@ -1355,7 +1362,7 @@ with tabs[1]:
             )
 
 # ---------- TAB 3 ----------
-with tabs[2]:
+elif view == "Pronóstico":
     st.subheader("Pronóstico de una emisora")
     st.caption(
         f"El modelo usa el horizonte elegido por el usuario: {selected_horizon_label}. "
@@ -1479,7 +1486,7 @@ with tabs[2]:
                 st.dataframe(cls_df.tail(20), width="stretch")
 
 # ---------- TAB 4 ----------
-with tabs[3]:
+elif view == "Comparativo":
     st.subheader("Comparativo entre emisoras")
     st.caption(
         "Se ordenan según el desempeño reciente del modelo y el horizonte seleccionado por el usuario "
@@ -1522,7 +1529,7 @@ with tabs[3]:
         )
 
 # ---------- TAB 5 ----------
-with tabs[4]:
+elif view == "Mi perfil y cartera":
     st.subheader("Mi perfil y cartera sugerida")
     st.caption(
         "Aquí se integra lo que pedía el protocolo: formulario del usuario, clasificación de perfil, "
