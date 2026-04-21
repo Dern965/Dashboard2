@@ -1,4 +1,3 @@
-
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -9,27 +8,27 @@ warnings.filterwarnings("ignore")
 
 # ===================== CONFIG PÁGINA =====================
 st.set_page_config(
-    page_title="EDA + Gamma (BMV) • Multi-ticker",
+    page_title="Análisis simple de acciones",
     layout="wide"
 )
 
 # ===================== PARÁMETROS FIJOS (ruta/columnas) =====================
-DATA_PATH   = "datos/market_prices.csv"
-DATE_COL    = "date"
-TICKER_COL  = "instrument_id"
-PRICE_COL   = "adj_close"
+DATA_PATH = "datos/market_prices.csv"
+DATE_COL = "date"
+TICKER_COL = "instrument_id"
+PRICE_COL = "adj_close"
 
 # ===================== CONFIG GAMMA =====================
 FIXED_FREQ = "B"
-FIXED_HORIZON = 10  # 2 semanas bursátiles ≈ 10 días hábiles
+FIXED_HORIZON = 10   # 10 días hábiles ≈ 2 semanas bursátiles
 FIXED_STEP = 10
 DEFAULT_WARM = 210
 DEFAULT_N_TEST = 50
 DEFAULT_LAGS_MORPH = 5
 
 SEASONAL_PRIOR = {
-    1: 0.0, 2: 0.0, 3:+0.10, 4:+0.20, 5:-0.10, 6:0.0,
-    7: 0.0, 8:-0.15, 9:-0.10, 10:-0.10, 11:+0.10, 12:0.0,
+    1: 0.0, 2: 0.0, 3: +0.10, 4: +0.20, 5: -0.10, 6: 0.0,
+    7: 0.0, 8: -0.15, 9: -0.10, 10: -0.10, 11: +0.10, 12: 0.0,
 }
 
 # ===================== UTILIDADES BÁSICAS =====================
@@ -44,19 +43,25 @@ def load_prices(path, date_col, ticker_col, price_col):
     if "volume" in df.columns:
         rename_map["volume"] = "volume"
     df = df.rename(columns=rename_map)
+
     required = ["date", "instrument_id", "adj_close"]
     for col in required:
         if col not in df.columns:
             raise ValueError(f"Falta la columna requerida: {col}")
+
     if "high" not in df.columns:
         df["high"] = df["adj_close"]
     if "low" not in df.columns:
         df["low"] = df["adj_close"]
     if "volume" not in df.columns:
         df["volume"] = 1.0
+
     keep = ["date", "instrument_id", "adj_close", "high", "low", "volume"]
-    df = df[keep].dropna(subset=["date", "instrument_id", "adj_close"]).sort_values(["instrument_id", "date"])
-    return df
+    return (
+        df[keep]
+        .dropna(subset=["date", "instrument_id", "adj_close"])
+        .sort_values(["instrument_id", "date"])
+    )
 
 def resample_ohlcv(df, freq="D"):
     out = []
@@ -75,6 +80,7 @@ def resample_ohlcv(df, freq="D"):
         tmp["instrument_id"] = ticker
         tmp = tmp.dropna(subset=["adj_close"]).reset_index()
         out.append(tmp)
+
     if not out:
         return pd.DataFrame(columns=["date", "adj_close", "high", "low", "volume", "instrument_id"])
     return pd.concat(out, ignore_index=True)
@@ -82,7 +88,7 @@ def resample_ohlcv(df, freq="D"):
 def wide_prices(df):
     return df.pivot(index="date", columns="instrument_id", values="adj_close").sort_index()
 
-# ===================== GAMMA CLASSIFIER =====================
+# ===================== MODELO GAMMA =====================
 class GammaBinary:
     def __init__(self, precision=2):
         self.precision = precision
@@ -176,6 +182,7 @@ def compute_error_metrics(y_true, y_pred):
     y_pred = y_pred[mask]
     if len(y_true) == 0:
         return {"MAE": np.nan, "RMSE": np.nan, "MAPE (%)": np.nan, "SMAPE (%)": np.nan, "R²": np.nan}
+
     mae = np.mean(np.abs(y_true - y_pred))
     rmse = np.sqrt(np.mean((y_true - y_pred) ** 2))
     denom = np.where(np.abs(y_true) < 1e-9, np.nan, np.abs(y_true))
@@ -183,6 +190,7 @@ def compute_error_metrics(y_true, y_pred):
     smape = np.mean(np.abs(y_true - y_pred) / (((np.abs(y_true) + np.abs(y_pred)) / 2) + 1e-9)) * 100
     ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
     r2 = 1 - np.sum((y_true - y_pred) ** 2) / (ss_tot + 1e-9)
+
     return {
         "MAE": float(mae),
         "RMSE": float(rmse),
@@ -194,6 +202,7 @@ def compute_error_metrics(y_true, y_pred):
 def evaluar_metricas_direction(preds, reals, rets, horizonte):
     if len(preds) == 0:
         return {"acum": np.array([0.0]), "sharpe": 0.0, "max_dd": 0.0, "hit_rate": 0.0}
+
     preds = np.asarray(preds)
     reals = np.asarray(reals)
     rets = np.asarray(rets, dtype=float)
@@ -227,6 +236,7 @@ def build_features_for_ticker(df_t, horizon=10, paso=10, warm=210, n_lags_morph=
     contexto = ["high_low_pct", "vol_real", "day_of_week", "bb_pct", "rsi_28", "ret_5d", "vol_ratio_5"]
     X_rows, y_arr, fechas, ret_fwd_arr, month_arr, rsi_arr, px_arr = [], [], [], [], [], [], []
     idx = warm
+
     while idx < len(df) - horizon:
         morph = list(df["ret_1d"].values[idx - n_lags_morph: idx])
         ctx = [df[f].values[idx] for f in contexto]
@@ -237,27 +247,19 @@ def build_features_for_ticker(df_t, horizon=10, paso=10, warm=210, n_lags_morph=
         month_arr.append(int(df["month_num"].values[idx]))
         rsi_arr.append(float(df["rsi_28"].values[idx]))
         px_arr.append(float(df["adj_close"].values[idx]))
-
         idx += paso
 
     if len(X_rows) < 80:
         return None
 
-    X = np.array(X_rows, dtype=np.float64)
-    y = np.array(y_arr, dtype=int)
-    months = np.array(month_arr, dtype=int)
-    ret_fwd_arr = np.array(ret_fwd_arr, dtype=float)
-    rsi_arr = np.array(rsi_arr, dtype=float)
-    px_arr = np.array(px_arr, dtype=float)
-
     return {
-        "X": X,
-        "y": y,
+        "X": np.array(X_rows, dtype=np.float64),
+        "y": np.array(y_arr, dtype=int),
         "dates": np.array(fechas),
-        "ret_fwd": ret_fwd_arr,
-        "months": months,
-        "rsi": rsi_arr,
-        "signal_price": px_arr,
+        "ret_fwd": np.array(ret_fwd_arr, dtype=float),
+        "months": np.array(month_arr, dtype=int),
+        "rsi": np.array(rsi_arr, dtype=float),
+        "signal_price": np.array(px_arr, dtype=float),
         "df_model": df,
     }
 
@@ -293,7 +295,7 @@ def run_gamma_backtest_for_ticker(df_t, horizon, paso, n_test, precisions, roll_
 
     pA, pB, pC = precisions
     wf_pa, wf_pb, wf_pc = [], [], []
-    wf_ens_pure, wf_ens_conf, wf_ens_adapt, wf_ens_unan, wf_ens_final = [], [], [], [], []
+    wf_ens_pure, wf_ens_final = [], []
     wf_real, wf_ret, wf_fecha = [], [], []
     wf_px_senal, wf_px_real, wf_px_pred = [], [], []
     roll_correct_A, roll_correct_B, roll_correct_C = [], [], []
@@ -322,7 +324,6 @@ def run_gamma_backtest_for_ticker(df_t, horizon, paso, n_test, precisions, roll_
         vp[pc] += 1 + cc
         ens_pure = 1 if vp[1] >= vp[0] else 0
         wf_ens_pure.append(ens_pure)
-        wf_ens_conf.append(abs(vp[1] - vp[0]) / (vp[1] + vp[0] + 1e-9))
 
         n_prev = min(i, roll_acc_win)
         w_a = np.mean(roll_correct_A[-n_prev:]) if n_prev >= 3 else 1.0
@@ -334,10 +335,6 @@ def run_gamma_backtest_for_ticker(df_t, horizon, paso, n_test, precisions, roll_
         va[pa] += w_a * (1 + ca)
         va[pb] += w_b * (1 + cb)
         va[pc] += w_c * (1 + cc)
-
-        ens_adapt = 1 if va[1] >= va[0] else 0
-        wf_ens_adapt.append(ens_adapt)
-        wf_ens_unan.append(pa if pa == pb == pc else -1)
 
         prior = SEASONAL_PRIOR.get(int(months[idx_train]), 0.0)
         vf = dict(va)
@@ -413,42 +410,54 @@ def run_gamma_backtest_for_ticker(df_t, horizon, paso, n_test, precisions, roll_
 
     ens_f = 1 if vf[1] >= vf[0] else 0
     conf_f = abs(vf[1] - vf[0]) / (vf[1] + vf[0] + 1e-9)
-    unanime_f = (ra_f[0] == rb_f[0] == rc_f[0])
 
     rsi_hoy = float(rsi_arr[-1])
-    override_txt = f"RSI-28={rsi_hoy:.1f} (zona normal)"
+    override_txt = f"RSI-28 = {rsi_hoy:.1f} (zona normal)"
     if rsi_hoy < rsi_sell:
         ens_f = 0
-        override_txt = f"⚠️ RSI-28 BAJA: {rsi_hoy:.1f} < {rsi_sell}"
+        override_txt = f"RSI bajo: {rsi_hoy:.1f} < {rsi_sell}"
     elif rsi_hoy > rsi_buy:
         ens_f = 1
-        override_txt = f"⚠️ RSI-28 ALTA: {rsi_hoy:.1f} > {rsi_buy}"
+        override_txt = f"RSI alto: {rsi_hoy:.1f} > {rsi_buy}"
 
     precio_hoy = float(px_signal[-1])
     fecha_hoy = pd.to_datetime(fechas[-1])
     fecha_t = fecha_hoy + pd.offsets.BDay(horizon)
 
-    ret_esp = float(np.mean(rt[rl == 1])) if ens_f == 1 and np.sum(rl == 1) > 0 else float(np.mean(rt[rl == 0])) if np.sum(rl == 0) > 0 else 0.0
+    ret_esp = (
+        float(np.mean(rt[rl == 1]))
+        if ens_f == 1 and np.sum(rl == 1) > 0
+        else float(np.mean(rt[rl == 0]))
+        if np.sum(rl == 0) > 0
+        else 0.0
+    )
     px_proj = precio_hoy * (1 + ret_esp / 100)
 
-    if conf_f < conf_min and not override_txt.startswith("⚠️"):
-        senal_txt = "HOLD"
+    if conf_f < conf_min and "RSI" in override_txt and "alto" not in override_txt and "bajo" not in override_txt:
+        senal_txt = "ESPERAR"
     else:
-        senal_txt = "BUY" if ens_f == 1 else "SELL"
+        senal_txt = "SUBE" if ens_f == 1 else "BAJA"
 
     return {
         "dates": wf_fecha,
         "acum_bh": acum_bh,
-        "met_A": met_A, "met_B": met_B, "met_C": met_C, "met_E": met_E, "met_F": met_F,
-        "pred_A": pa_arr, "pred_B": pb_arr, "pred_C": pc_arr, "pred_E": ep, "pred_F": ef,
-        "real_cls": rl, "ret_real": rt,
+        "met_A": met_A,
+        "met_B": met_B,
+        "met_C": met_C,
+        "met_E": met_E,
+        "met_F": met_F,
+        "pred_A": pa_arr,
+        "pred_B": pb_arr,
+        "pred_C": pc_arr,
+        "pred_E": ep,
+        "pred_F": ef,
+        "real_cls": rl,
+        "ret_real": rt,
         "px_signal": np.array(wf_px_senal, dtype=float),
         "px_real": px_rl,
         "px_pred": px_pr,
         "err_metrics": err_metrics,
-        "roll_correct_A": roll_correct_A, "roll_correct_B": roll_correct_B, "roll_correct_C": roll_correct_C,
         "current_signal": senal_txt,
-        "current_signal_num": ens_f,
         "current_conf": float(conf_f),
         "current_price": precio_hoy,
         "projected_price": float(px_proj),
@@ -457,74 +466,105 @@ def run_gamma_backtest_for_ticker(df_t, horizon, paso, n_test, precisions, roll_
         "target_date": fecha_t,
         "override_txt": override_txt,
         "current_rsi": rsi_hoy,
-        "unanime_f": unanime_f,
-        "ra_f": ra_f, "rb_f": rb_f, "rc_f": rc_f,
     }
 
-def explain_error_metrics(m):
+# ===================== AYUDAS VISUALES =====================
+def fmt_num(x, dec=2):
+    if pd.isna(x):
+        return "-"
+    return f"{x:,.{dec}f}"
+
+def fmt_pct(x, dec=2):
+    if pd.isna(x):
+        return "-"
+    return f"{x:.{dec}f}%"
+
+def estado_color(signal):
+    if signal == "SUBE":
+        return "🟢"
+    if signal == "BAJA":
+        return "🔴"
+    return "🟡"
+
+def confianza_texto(conf):
+    if conf >= 0.20:
+        return "Alta"
+    if conf >= 0.08:
+        return "Media"
+    return "Baja"
+
+def explicar_error_simple(m):
     return (
-        f"MAE={m['MAE']:.3f}, RMSE={m['RMSE']:.3f}, "
-        f"MAPE={m['MAPE (%)']:.2f}%, SMAPE={m['SMAPE (%)']:.2f}%, R²={m['R²']:.4f}. "
-        "MAPE mide el error porcentual absoluto respecto al valor real; "
-        "SMAPE hace ese error simétrico y penaliza menos los cambios de escala."
+        f"Error promedio: {fmt_num(m['MAE'], 3)} | "
+        f"Error porcentual: {fmt_pct(m['MAPE (%)'], 2)} | "
+        f"Ajuste general (R²): {fmt_num(m['R²'], 3)}"
     )
 
-def signal_badge(s):
-    if s == "BUY":
-        return "🟩 BUY"
-    if s == "SELL":
-        return "🟥 SELL"
-    return "🟨 HOLD"
+def help_box(text):
+    st.info(text)
 
 # ===================== CARGA =====================
 try:
     raw = load_prices(DATA_PATH, DATE_COL, TICKER_COL, PRICE_COL)
 except Exception as e:
-    st.error(f"No pude leer el CSV en '{DATA_PATH}': {e}")
+    st.error(f"No pude leer el archivo de datos en '{DATA_PATH}': {e}")
     st.stop()
 
 # ===================== CONTROLES =====================
-st.sidebar.header("Parámetros Gamma")
-st.sidebar.info("Frecuencia fija: días hábiles bursátiles (B).\nHorizonte fijo: 2 semanas = 10 días hábiles.")
+st.sidebar.title("Configuración")
+st.sidebar.caption("Puedes dejar estos valores como están si solo quieres explorar.")
 
-horizon = FIXED_HORIZON
-paso = FIXED_STEP
-
-n_test = st.sidebar.number_input("Ventanas de prueba walk-forward", min_value=20, value=DEFAULT_N_TEST, step=5)
-warm = st.sidebar.number_input("Warm-up mínimo", min_value=60, value=DEFAULT_WARM, step=10)
-n_lags_morph = st.sidebar.number_input("Lags morfológicos", min_value=2, value=DEFAULT_LAGS_MORPH, step=1)
-pA = st.sidebar.number_input("Precisión Gamma A", min_value=1, value=1, step=1)
-pB = st.sidebar.number_input("Precisión Gamma B", min_value=1, value=3, step=1)
-pC = st.sidebar.number_input("Precisión Gamma C", min_value=1, value=4, step=1)
-roll_acc_win = st.sidebar.number_input("Ventana rolling de accuracy", min_value=3, value=10, step=1)
-rsi_sell = st.sidebar.number_input("RSI umbral SELL", min_value=1, max_value=99, value=22, step=1)
-rsi_buy = st.sidebar.number_input("RSI umbral BUY", min_value=1, max_value=99, value=72, step=1)
-conf_min = st.sidebar.number_input("Confianza mínima para HOLD", min_value=0.0, value=0.04, step=0.01)
+with st.sidebar.expander("Ajustes avanzados del modelo"):
+    n_test = st.number_input("Pruebas históricas", min_value=20, value=DEFAULT_N_TEST, step=5)
+    warm = st.number_input("Datos mínimos para arrancar", min_value=60, value=DEFAULT_WARM, step=10)
+    n_lags_morph = st.number_input("Cambios recientes usados por el modelo", min_value=2, value=DEFAULT_LAGS_MORPH, step=1)
+    pA = st.number_input("Nivel Gamma A", min_value=1, value=1, step=1)
+    pB = st.number_input("Nivel Gamma B", min_value=1, value=3, step=1)
+    pC = st.number_input("Nivel Gamma C", min_value=1, value=4, step=1)
+    roll_acc_win = st.number_input("Ventana de evaluación interna", min_value=3, value=10, step=1)
+    rsi_sell = st.number_input("Límite RSI para señal de baja", min_value=1, max_value=99, value=22, step=1)
+    rsi_buy = st.number_input("Límite RSI para señal de subida", min_value=1, max_value=99, value=72, step=1)
+    conf_min = st.number_input("Confianza mínima para marcar 'esperar'", min_value=0.0, value=0.04, step=0.01)
 
 # ===================== PREPROCESO =====================
 df_rs = resample_ohlcv(raw, freq=FIXED_FREQ)
 wide = wide_prices(df_rs)
 tickers_all = sorted(df_rs["instrument_id"].unique().tolist())
 
-st.title("EDA + Gamma • Multi-ticker (BMV/MXN)")
-st.caption("Versión sin ARIMA/SARIMA. El motor usa un ensamble Gamma con backtest walk-forward sobre datos bursátiles diarios y pronóstico fijo a 2 semanas (10 días hábiles), con métricas MAE, RMSE, MAPE y SMAPE.")
+st.title("Panel simple de análisis bursátil")
+st.caption(
+    "Esta versión conserva el motor Gamma, pero presenta los resultados de forma más clara. "
+    "El objetivo es que cualquier persona entienda qué pasó con el precio, qué estima el modelo y cómo comparar emisoras."
+)
 
-tabs = st.tabs(["Resumen multi-ticker", "EDA por ticker", "Gamma por ticker", "Ranking Gamma"])
+help_box(
+    "Qué significa cada señal: 🟢 SUBE = el modelo espera un aumento, 🔴 BAJA = espera una caída, "
+    "🟡 ESPERAR = no hay suficiente claridad para tomar una dirección."
+)
+
+tabs = st.tabs(["Vista general", "Entender una emisora", "Pronóstico", "Comparativo"])
 
 # ---------- TAB 1 ----------
 with tabs[0]:
-    st.subheader("1) Vista rápida de precios por emisora")
+    st.subheader("Vista general de precios")
+    st.caption("Aquí puedes comparar cómo se han movido una o varias emisoras en el tiempo.")
+
     if not tickers_all:
-        st.info("No hay tickers disponibles.")
+        st.info("No hay emisoras disponibles.")
     else:
-        sel = st.multiselect("Elige 1 o más tickers", options=tickers_all, default=tickers_all[:2] if len(tickers_all) >= 2 else tickers_all)
+        sel = st.multiselect(
+            "Selecciona una o más emisoras",
+            options=tickers_all,
+            default=tickers_all[:2] if len(tickers_all) >= 2 else tickers_all,
+        )
+
         if sel:
             tmp = wide[sel].copy().sort_index().dropna(how="all")
             c1, c2 = st.columns(2)
             with c1:
-                ultimos_3y = st.checkbox("Mostrar solo últimos 3 años", value=False)
+                ultimos_3y = st.checkbox("Ver solo los últimos 3 años", value=False)
             with c2:
-                normalizar = st.checkbox("Comparar en escala comparable (índice = 100)", value=False)
+                normalizar = st.checkbox("Comparar desde una base común de 100", value=False)
 
             if ultimos_3y and not tmp.empty:
                 inicio = tmp.index.max() - pd.DateOffset(years=3)
@@ -533,33 +573,42 @@ with tabs[0]:
                 base = tmp.ffill().bfill().iloc[0]
                 tmp = tmp.divide(base) * 100
 
-            st.line_chart(tmp, width='stretch')
+            st.line_chart(tmp, width="stretch")
 
-            st.markdown("#### Desempeño comparativo (últimos 3 años, retornos mensuales)")
+            st.markdown("### Resumen comparativo")
+            st.caption("Estos indicadores toman los últimos 3 años con datos mensuales.")
             wide_m = wide.resample("M").last()
             rets_m = wide_m[sel].pct_change().dropna()
             if len(rets_m) > 36:
                 rets_m = rets_m.iloc[-36:]
+
             if rets_m.empty:
-                st.info("Aún no hay suficientes meses con datos.")
+                st.info("Aún no hay suficientes datos para comparar estas emisoras.")
             else:
                 ann = 12
                 perf = pd.DataFrame({
-                    "Retorno anual (%)": rets_m.mean() * ann * 100,
-                    "Vol anual (%)": rets_m.std() * np.sqrt(ann) * 100,
-                    "Sharpe (rf=0)": rets_m.mean() / rets_m.std()
+                    "Cambio promedio anual": rets_m.mean() * ann * 100,
+                    "Variación anual": rets_m.std() * np.sqrt(ann) * 100,
+                    "Relación rendimiento/riesgo": rets_m.mean() / rets_m.std(),
                 }).round(2).dropna()
-                st.dataframe(perf, width='stretch')
+                st.dataframe(perf, width="stretch")
+                help_box(
+                    "Cambio promedio anual muestra el crecimiento medio estimado, variación anual refleja qué tanto se mueve la serie, "
+                    "y la relación rendimiento/riesgo ayuda a comparar qué tan eficiente fue ese desempeño."
+                )
 
 # ---------- TAB 2 ----------
 with tabs[1]:
-    st.subheader("2) Exploración de una serie (EDA)")
+    st.subheader("Entender una emisora")
+    st.caption("Esta sección sirve para ver una sola emisora con más detalle.")
+
     if not tickers_all:
-        st.info("No hay emisoras suficientes para EDA.")
+        st.info("No hay emisoras suficientes para analizar.")
     else:
-        t = st.selectbox("Ticker para EDA", options=tickers_all, index=0, key="eda_ticker_gamma")
+        t = st.selectbox("Elige la emisora", options=tickers_all, index=0, key="eda_ticker_gamma")
         dt = df_rs[df_rs["instrument_id"] == t].sort_values("date").copy()
         y = dt.set_index("date")["adj_close"].dropna()
+
         if y.empty:
             st.info("No hay datos suficientes.")
         else:
@@ -567,48 +616,51 @@ with tabs[1]:
             with c1:
                 fig = go.Figure()
                 fig.add_scatter(x=y.index, y=y.values, mode="lines", name="Precio")
-                fig.update_layout(title=f"{t} • Precio ajustado", xaxis_title="Fecha", yaxis_title="Precio")
-                st.plotly_chart(fig, width='stretch')
+                fig.update_layout(
+                    title=f"Evolución del precio de {t}",
+                    xaxis_title="Fecha",
+                    yaxis_title="Precio"
+                )
+                st.plotly_chart(fig, width="stretch")
             with c2:
                 ret_1d = y.pct_change().dropna() * 100
-                st.markdown("**Resumen**")
-                resumen = pd.Series({
-                    "Observaciones": int(y.shape[0]),
-                    "Inicio": y.index.min(),
-                    "Fin": y.index.max(),
-                    "Media precio": float(y.mean()),
-                    "Desv. est. precio": float(y.std()),
-                    "Retorno medio 1p (%)": float(ret_1d.mean()) if len(ret_1d) else np.nan,
-                }, dtype=object)
-                resumen.loc[["Media precio", "Desv. est. precio", "Retorno medio 1p (%)"]] = (
-                    pd.to_numeric(
-                        resumen.loc[["Media precio", "Desv. est. precio", "Retorno medio 1p (%)"]],
-                        errors="coerce"
-                    ).round(4)
-                )
-                st.write(resumen)
+                st.markdown("### Resumen rápido")
+                st.metric("Datos observados", int(y.shape[0]))
+                st.metric("Precio promedio", fmt_num(float(y.mean()), 2))
+                st.metric("Cambio diario promedio", fmt_pct(float(ret_1d.mean()) if len(ret_1d) else np.nan, 2))
+                st.caption(f"Periodo analizado: {y.index.min().date()} a {y.index.max().date()}")
+
             feats = dt.copy()
-            feats["RSI-28"] = calc_rsi(feats["adj_close"], 28)
-            feats["BB_pct"] = calc_bb_pct(feats["adj_close"], 20)
-            feats["Volatilidad 10p"] = feats["adj_close"].pct_change().rolling(10).std() * 100
-            st.markdown("### Indicadores usados por Gamma")
+            feats["Fuerza del movimiento (RSI)"] = calc_rsi(feats["adj_close"], 28)
+            feats["Posición dentro de banda"] = calc_bb_pct(feats["adj_close"], 20)
+            feats["Volatilidad reciente (%)"] = feats["adj_close"].pct_change().rolling(10).std() * 100
+
+            st.markdown("### Indicadores que usa el modelo")
+            st.caption("No necesitas saber la fórmula exacta: solo ayudan a medir impulso, posición del precio y variabilidad reciente.")
             fig2 = px.line(
-                feats.melt(id_vars="date", value_vars=["RSI-28", "BB_pct", "Volatilidad 10p"]),
-                x="date", y="value", color="variable",
-                title="Indicadores del pipeline Gamma"
+                feats.melt(
+                    id_vars="date",
+                    value_vars=["Fuerza del movimiento (RSI)", "Posición dentro de banda", "Volatilidad reciente (%)"]
+                ),
+                x="date",
+                y="value",
+                color="variable",
+                title="Comportamiento reciente de los indicadores"
             )
-            st.plotly_chart(fig2, width='stretch')
+            st.plotly_chart(fig2, width="stretch")
 
 # ---------- TAB 3 ----------
 with tabs[2]:
-    st.subheader("3) Backtest y señal actual con Gamma (horizonte fijo: 2 semanas)")
+    st.subheader("Pronóstico de una emisora")
+    st.caption("El modelo estima qué podría pasar en aproximadamente 2 semanas hábiles.")
+
     if not tickers_all:
         st.info("No hay emisoras suficientes para modelar.")
     else:
-        t2 = st.selectbox("Ticker para Gamma", options=tickers_all, index=0, key="gamma_ticker")
+        t2 = st.selectbox("Selecciona la emisora a pronosticar", options=tickers_all, index=0, key="gamma_ticker")
         df_t = df_rs[df_rs["instrument_id"] == t2].sort_values("date").copy()
 
-        with st.spinner("Entrenando y evaluando Gamma..."):
+        with st.spinner("Analizando la emisora..."):
             res = run_gamma_backtest_for_ticker(
                 df_t=df_t,
                 horizon=FIXED_HORIZON,
@@ -624,76 +676,99 @@ with tabs[2]:
             )
 
         if res is None:
-            st.warning("No hay suficientes datos para correr Gamma con el horizonte fijo de 2 semanas y la configuración actual.")
+            st.warning("No hay suficientes datos para generar el análisis con la configuración actual.")
         else:
             st.success(
-                f"Señal actual: {signal_badge(res['current_signal'])} | "
-                f"Confianza={res['current_conf']:.3f} | "
-                f"Precio actual={res['current_price']:.3f} | "
-                f"Precio proyectado={res['projected_price']:.3f}"
+                f"{estado_color(res['current_signal'])} Señal actual: {res['current_signal']} | "
+                f"Confianza: {confianza_texto(res['current_conf'])}"
             )
-            st.caption(f"{res['override_txt']} • Fecha señal: {res['current_date'].date()} • Fecha objetivo a 2 semanas bursátiles: {res['target_date'].date()}")
+            st.caption(
+                f"Fecha actual: {res['current_date'].date()} | Fecha estimada: {res['target_date'].date()} | {res['override_txt']}"
+            )
 
             m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Hit Rate final (%)", f"{res['met_F']['hit_rate']:.2f}")
-            m2.metric("Sharpe final", f"{res['met_F']['sharpe']:.2f}")
-            m3.metric("Max Drawdown (%)", f"{res['met_F']['max_dd']:.2f}")
-            m4.metric("Retorno esperado (%)", f"{res['expected_ret_pct']:.2f}")
+            m1.metric("Señal", res["current_signal"])
+            m2.metric("Precio actual", fmt_num(res["current_price"], 2))
+            m3.metric("Precio estimado", fmt_num(res["projected_price"], 2))
+            m4.metric("Cambio esperado", fmt_pct(res["expected_ret_pct"], 2))
 
-            st.markdown("#### Métricas de error del precio proyectado")
-            err_df = pd.DataFrame([res["err_metrics"]]).round(4)
-            st.dataframe(err_df, width='stretch')
-            st.info(explain_error_metrics(res["err_metrics"]))
+            st.markdown("### Qué tan bien ha funcionado")
+            a1, a2, a3 = st.columns(3)
+            a1.metric("Acierto de dirección", fmt_pct(res["met_F"]["hit_rate"], 2))
+            a2.metric("Riesgo de caída máxima", fmt_pct(res["met_F"]["max_dd"], 2))
+            a3.metric("Precisión general del precio", fmt_num(res["err_metrics"]["R²"], 3))
+            help_box(
+                "Acierto de dirección indica cuántas veces el modelo acertó si subía o bajaba. "
+                "Riesgo de caída máxima muestra la peor caída vista en la estrategia. "
+                "R² cercano a 1 implica mejor ajuste general del precio proyectado."
+            )
+
+            st.markdown("### Error del precio estimado")
+            err_df = pd.DataFrame([{
+                "Error promedio": round(res["err_metrics"]["MAE"], 4),
+                "Error cuadrático": round(res["err_metrics"]["RMSE"], 4),
+                "Error porcentual": round(res["err_metrics"]["MAPE (%)"], 2),
+                "Error porcentual simétrico": round(res["err_metrics"]["SMAPE (%)"], 2),
+                "R²": round(res["err_metrics"]["R²"], 4),
+            }])
+            st.dataframe(err_df, width="stretch")
+            st.info(explicar_error_simple(res["err_metrics"]))
 
             df_curve = pd.DataFrame({
                 "Fecha": pd.to_datetime(res["dates"]),
-                "Pipeline final": res["met_F"]["acum"] * 100,
-                "Ensemble puro": res["met_E"]["acum"] * 100,
-                "Buy & Hold": res["acum_bh"] * 100,
+                "Modelo final": res["met_F"]["acum"] * 100,
+                "Compra y mantén": res["acum_bh"] * 100,
                 "Gamma A": res["met_A"]["acum"] * 100,
                 "Gamma B": res["met_B"]["acum"] * 100,
                 "Gamma C": res["met_C"]["acum"] * 100,
             })
             fig_curve = px.line(
-                df_curve.melt(id_vars="Fecha", var_name="Serie", value_name="Retorno %"),
-                x="Fecha", y="Retorno %", color="Serie",
-                title="Retorno acumulado walk-forward"
+                df_curve.melt(id_vars="Fecha", var_name="Serie", value_name="Cambio acumulado (%)"),
+                x="Fecha",
+                y="Cambio acumulado (%)",
+                color="Serie",
+                title="Comparación del desempeño acumulado"
             )
-            st.plotly_chart(fig_curve, width='stretch')
+            st.plotly_chart(fig_curve, width="stretch")
 
             df_price = pd.DataFrame({
                 "Fecha": pd.to_datetime(res["dates"]),
-                "Precio real T+h": res["px_real"],
-                "Precio predicho T+h": res["px_pred"],
-                "Precio en señal T0": res["px_signal"],
+                "Precio real": res["px_real"],
+                "Precio estimado": res["px_pred"],
+                "Precio de partida": res["px_signal"],
             })
             fig_price = px.line(
                 df_price.melt(id_vars="Fecha", var_name="Serie", value_name="Precio"),
-                x="Fecha", y="Precio", color="Serie",
-                title="Precio real vs precio predicho"
+                x="Fecha",
+                y="Precio",
+                color="Serie",
+                title="Precio real vs precio estimado"
             )
-            st.plotly_chart(fig_price, width='stretch')
+            st.plotly_chart(fig_price, width="stretch")
 
-            cls_df = pd.DataFrame({
-                "Fecha": pd.to_datetime(res["dates"]),
-                "Real": res["real_cls"],
-                "Gamma A": res["pred_A"],
-                "Gamma B": res["pred_B"],
-                "Gamma C": res["pred_C"],
-                "Pipeline final": res["pred_F"],
-            })
-            st.markdown("#### Clasificaciones direccionales (1=sube, 0=baja)")
-            st.dataframe(cls_df.tail(20), width='stretch')
+            with st.expander("Ver detalle técnico de clasificaciones"):
+                cls_df = pd.DataFrame({
+                    "Fecha": pd.to_datetime(res["dates"]),
+                    "Real": res["real_cls"],
+                    "Gamma A": res["pred_A"],
+                    "Gamma B": res["pred_B"],
+                    "Gamma C": res["pred_C"],
+                    "Modelo final": res["pred_F"],
+                })
+                st.caption("1 = subió, 0 = bajó")
+                st.dataframe(cls_df.tail(20), width="stretch")
 
 # ---------- TAB 4 ----------
 with tabs[3]:
-    st.subheader("4) Ranking Gamma multi-ticker (pronóstico fijo a 2 semanas)")
-    st.caption("El ranking usa frecuencia fija diaria bursátil y horizonte fijo de 2 semanas. Ordena por Score = hit_rate_final + sharpe − 0.25×SMAPE − 0.10×MAPE.")
+    st.subheader("Comparativo entre emisoras")
+    st.caption("Se ordenan según desempeño reciente del modelo y calidad del pronóstico.")
+
     if not tickers_all:
         st.info("No hay emisoras suficientes.")
     else:
         results = []
-        progress = st.progress(0.0, text="Procesando tickers...")
+        progress = st.progress(0.0, text="Analizando emisoras...")
+
         for i, ticker in enumerate(tickers_all):
             df_t = df_rs[df_rs["instrument_id"] == ticker].sort_values("date").copy()
             res = run_gamma_backtest_for_ticker(
@@ -709,6 +784,7 @@ with tabs[3]:
                 warm=int(warm),
                 n_lags_morph=int(n_lags_morph),
             )
+
             if res is not None:
                 score = (
                     res["met_F"]["hit_rate"]
@@ -717,41 +793,44 @@ with tabs[3]:
                     - 0.10 * res["err_metrics"]["MAPE (%)"]
                 )
                 results.append({
-                    "ticker": ticker,
-                    "signal": res["current_signal"],
-                    "confidence": round(res["current_conf"], 4),
-                    "hit_rate_final (%)": round(res["met_F"]["hit_rate"], 3),
-                    "sharpe_final": round(res["met_F"]["sharpe"], 3),
-                    "max_dd_final (%)": round(res["met_F"]["max_dd"], 3),
-                    "expected_ret (%)": round(res["expected_ret_pct"], 3),
-                    "projected_price": round(res["projected_price"], 4),
-                    "MAPE (%)": round(res["err_metrics"]["MAPE (%)"], 3),
-                    "SMAPE (%)": round(res["err_metrics"]["SMAPE (%)"], 3),
-                    "MAE": round(res["err_metrics"]["MAE"], 4),
-                    "RMSE": round(res["err_metrics"]["RMSE"], 4),
-                    "R²": round(res["err_metrics"]["R²"], 4),
-                    "score": round(score, 4),
+                    "Emisora": ticker,
+                    "Señal": res["current_signal"],
+                    "Confianza": confianza_texto(res["current_conf"]),
+                    "Acierto (%)": round(res["met_F"]["hit_rate"], 2),
+                    "Caída máxima (%)": round(res["met_F"]["max_dd"], 2),
+                    "Cambio esperado (%)": round(res["expected_ret_pct"], 2),
+                    "Precio estimado": round(res["projected_price"], 2),
+                    "Error porcentual (%)": round(res["err_metrics"]["MAPE (%)"], 2),
+                    "R²": round(res["err_metrics"]["R²"], 3),
+                    "Score": round(score, 3),
                 })
-            progress.progress((i + 1) / len(tickers_all), text=f"Procesando tickers... {i+1}/{len(tickers_all)}")
+
+            progress.progress((i + 1) / len(tickers_all), text=f"Analizando emisoras... {i + 1}/{len(tickers_all)}")
+
         progress.empty()
 
         if not results:
-            st.warning("No se pudo generar el ranking con los parámetros actuales.")
+            st.warning("No se pudo generar el comparativo con la configuración actual.")
         else:
-            rank = pd.DataFrame(results).sort_values("score", ascending=False).reset_index(drop=True)
-            st.dataframe(rank, width='stretch')
+            rank = pd.DataFrame(results).sort_values("Score", ascending=False).reset_index(drop=True)
+            st.dataframe(rank, width="stretch")
 
-            top5 = rank.head(5)
             st.markdown("### Top 5")
-            st.dataframe(top5, width='stretch')
+            top5 = rank.head(5)
+            st.dataframe(top5, width="stretch")
 
             fig_top = go.Figure()
-            fig_top.add_bar(x=top5["ticker"], y=top5["hit_rate_final (%)"], name="Hit Rate final (%)")
-            fig_top.add_bar(x=top5["ticker"], y=top5["SMAPE (%)"], name="SMAPE (%)")
+            fig_top.add_bar(x=top5["Emisora"], y=top5["Acierto (%)"], name="Acierto (%)")
+            fig_top.add_bar(x=top5["Emisora"], y=top5["Error porcentual (%)"], name="Error (%)")
             fig_top.update_layout(
                 barmode="group",
-                title="Top 5: precisión direccional vs error simétrico",
-                xaxis_title="Ticker",
+                title="Top 5: acierto del modelo vs error del pronóstico",
+                xaxis_title="Emisora",
                 yaxis_title="Valor"
             )
-            st.plotly_chart(fig_top, width='stretch')
+            st.plotly_chart(fig_top, width="stretch")
+
+            help_box(
+                "Una emisora mejor posicionada suele combinar mayor acierto, menor error y una expectativa más favorable. "
+                "Aun así, el ranking es una ayuda de análisis, no una garantía de inversión."
+            )
