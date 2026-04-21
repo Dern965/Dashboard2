@@ -1,30 +1,25 @@
-import numpy as np
-import pandas as pd
-import streamlit as st
-import plotly.express as px
-import plotly.graph_objects as go
 import warnings
 warnings.filterwarnings("ignore")
 
-# ===================== CONFIG PÁGINA =====================
-st.set_page_config(
-    page_title="Análisis simple de acciones",
-    layout="wide"
-)
+import numpy as np
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import streamlit as st
 
-# ===================== PARÁMETROS FIJOS (ruta/columnas) =====================
+# ===================== CONFIG PÁGINA =====================
+st.set_page_config(page_title="Estrategias de inversión personalizadas", layout="wide")
+
+# ===================== PARÁMETROS FIJOS =====================
 DATA_PATH = "datos/market_prices.csv"
 DATE_COL = "date"
 TICKER_COL = "instrument_id"
 PRICE_COL = "adj_close"
-
-# ===================== CONFIG GAMMA =====================
 FIXED_FREQ = "B"
-FIXED_HORIZON = 10   # 10 días hábiles ≈ 2 semanas bursátiles
-FIXED_STEP = 10
-DEFAULT_WARM = 210
 DEFAULT_N_TEST = 50
+DEFAULT_WARM = 210
 DEFAULT_LAGS_MORPH = 5
+DEFAULT_CONF_MIN = 0.04
 
 SEASONAL_PRIOR = {
     1: 0.0, 2: 0.0, 3: +0.10, 4: +0.20, 5: -0.10, 6: 0.0,
@@ -63,6 +58,7 @@ def load_prices(path, date_col, ticker_col, price_col):
         .sort_values(["instrument_id", "date"])
     )
 
+
 def resample_ohlcv(df, freq="D"):
     out = []
     rule = {"D": "D", "W": "W", "B": "B", "M": "M", "Q": "Q"}[freq]
@@ -85,8 +81,10 @@ def resample_ohlcv(df, freq="D"):
         return pd.DataFrame(columns=["date", "adj_close", "high", "low", "volume", "instrument_id"])
     return pd.concat(out, ignore_index=True)
 
+
 def wide_prices(df):
     return df.pivot(index="date", columns="instrument_id", values="adj_close").sort_index()
+
 
 # ===================== MODELO GAMMA =====================
 class GammaBinary:
@@ -136,7 +134,7 @@ class GammaBinary:
             for theta in range(self.rho + 1):
                 csums = {c: 0 for c in self.classes}
                 start = 0
-                for j, em in enumerate(self.max_int_vals):
+                for _, em in enumerate(self.max_int_vals):
                     end = start + int(em)
                     seg_tr = self.X_enc[:, start:end].astype(np.int16)
                     seg_te = pat[start:end].astype(np.int16)
@@ -159,6 +157,7 @@ class GammaBinary:
             results.append((winner, conf, last_scores))
         return results
 
+
 # ===================== FEATURES Y MÉTRICAS =====================
 def calc_rsi(s, p=14):
     d = s.diff()
@@ -166,13 +165,16 @@ def calc_rsi(s, p=14):
     l = (-d.clip(upper=0)).rolling(p, min_periods=p).mean()
     return (100 - 100 / (1 + g / l.replace(0, np.nan))).fillna(50)
 
+
 def calc_bb_pct(s, w=20):
     ma = s.rolling(w).mean()
     std = s.rolling(w).std().replace(0, np.nan)
     return ((s - (ma - 2 * std)) / (4 * std)).clip(0, 1).fillna(0.5)
 
+
 def calc_vol_ratio(vol, w):
     return (vol / vol.rolling(w).mean()).fillna(1.0).clip(0, 5)
+
 
 def compute_error_metrics(y_true, y_pred):
     y_true = np.asarray(y_true, dtype=float)
@@ -199,6 +201,7 @@ def compute_error_metrics(y_true, y_pred):
         "R²": float(r2),
     }
 
+
 def evaluar_metricas_direction(preds, reals, rets, horizonte):
     if len(preds) == 0:
         return {"acum": np.array([0.0]), "sharpe": 0.0, "max_dd": 0.0, "hit_rate": 0.0}
@@ -215,9 +218,11 @@ def evaluar_metricas_direction(preds, reals, rets, horizonte):
     sharpe = float((np.mean(strategy_rets) / (np.std(strategy_rets) + 1e-9)) * np.sqrt(252 / max(horizonte, 1)))
     return {"acum": acum, "sharpe": sharpe, "max_dd": max_dd, "hit_rate": hit_rate}
 
+
 def build_features_for_ticker(df_t, horizon=10, paso=10, warm=210, n_lags_morph=5):
     df = df_t.sort_values("date").reset_index(drop=True).copy()
-    if len(df) < max(500, warm + horizon + 30):
+    min_hist = max(260, warm + horizon + 30)
+    if len(df) < min_hist:
         return None
 
     df["ret_1d"] = df["adj_close"].pct_change(1) * 100
@@ -249,7 +254,7 @@ def build_features_for_ticker(df_t, horizon=10, paso=10, warm=210, n_lags_morph=
         px_arr.append(float(df["adj_close"].values[idx]))
         idx += paso
 
-    if len(X_rows) < 80:
+    if len(X_rows) < 50:
         return None
 
     return {
@@ -263,6 +268,7 @@ def build_features_for_ticker(df_t, horizon=10, paso=10, warm=210, n_lags_morph=
         "df_model": df,
     }
 
+
 def robust_scale_train_test(X, split_idx):
     p2 = np.percentile(X[:split_idx], 2, axis=0)
     p98 = np.percentile(X[:split_idx], 98, axis=0)
@@ -272,6 +278,7 @@ def robust_scale_train_test(X, split_idx):
     Xs[:split_idx] = np.clip(Xs[:split_idx], 0, 1)
     Xs[split_idx:] = np.clip(Xs[split_idx:], 0, 1)
     return Xs
+
 
 @st.cache_data(show_spinner=False)
 def run_gamma_backtest_for_ticker(df_t, horizon, paso, n_test, precisions, roll_acc_win, rsi_sell, rsi_buy, conf_min, warm, n_lags_morph):
@@ -468,16 +475,426 @@ def run_gamma_backtest_for_ticker(df_t, horizon, paso, n_test, precisions, roll_
         "current_rsi": rsi_hoy,
     }
 
+
+# ===================== PERFIL DE USUARIO Y PORTAFOLIO =====================
+def horizon_to_business_days(value, unit):
+    factors = {"Días hábiles": 1, "Semanas": 5, "Meses": 21}
+    return int(max(5, value * factors[unit]))
+
+
+def human_horizon_label(value, unit):
+    suffix = {"Días hábiles": "día(s) hábil(es)", "Semanas": "semana(s)", "Meses": "mes(es)"}
+    return f"{value} {suffix[unit]}"
+
+
+def classify_investor_profile(amount, horizon_days, risk_tolerance, goal):
+    horizon_score = 0 if horizon_days <= 15 else 1 if horizon_days <= 63 else 2
+    goal_score = {
+        "Cuidar mi dinero": -1,
+        "Balance entre crecimiento y estabilidad": 0,
+        "Hacer crecer mi inversión": 1,
+        "Buscar una oportunidad más agresiva": 2,
+    }[goal]
+    total = (risk_tolerance - 1) * 1.6 + horizon_score + goal_score
+
+    if total <= 2.5:
+        profile = "Conservador"
+        description = "Priorizas estabilidad, menor exposición y más protección del capital."
+    elif total <= 5.5:
+        profile = "Moderado"
+        description = "Buscas crecer sin dejar de cuidar el riesgo."
+    else:
+        profile = "Agresivo"
+        description = "Aceptas movimientos fuertes con tal de buscar mayor crecimiento."
+
+    amount_note = ""
+    if amount < 20000:
+        amount_note = " Como el monto es relativamente pequeño, conviene evitar repartirlo en demasiadas emisoras."
+    elif amount > 150000:
+        amount_note = " Como el monto es más alto, sí tiene sentido diversificar un poco más."
+
+    return {
+        "perfil": profile,
+        "puntaje": round(float(total), 2),
+        "descripcion": description + amount_note,
+        "horizonte_dias": int(horizon_days),
+        "umbral_volatilidad": {"Conservador": 24, "Moderado": 34, "Agresivo": 50}[profile],
+        "cash_base": {"Conservador": 0.30, "Moderado": 0.15, "Agresivo": 0.05}[profile],
+        "max_peso": {"Conservador": 0.30, "Moderado": 0.40, "Agresivo": 0.50}[profile],
+        "n_base": {"Conservador": 2, "Moderado": 3, "Agresivo": 4}[profile],
+    }
+
+
+def compute_max_drawdown(price_series):
+    s = pd.Series(price_series).dropna().astype(float)
+    if s.empty:
+        return np.nan
+    eq = s / s.iloc[0]
+    peak = eq.cummax()
+    dd = (eq - peak) / peak
+    return float(dd.min() * 100)
+
+
+def compute_volatility_snapshot(df_t):
+    s = df_t.sort_values("date").set_index("date")["adj_close"].dropna().astype(float)
+    ret = s.pct_change().dropna()
+    if ret.empty:
+        return {
+            "vol_20d": np.nan,
+            "vol_60d": np.nan,
+            "vol_downside": np.nan,
+            "max_dd_252": np.nan,
+            "ret_63d": np.nan,
+            "ret_252d": np.nan,
+            "risk_band": "Sin datos",
+        }
+
+    r20 = ret.tail(20)
+    r60 = ret.tail(60)
+    r252 = ret.tail(252)
+    downside = r252[r252 < 0]
+
+    vol_20d = float(r20.std() * np.sqrt(252) * 100) if len(r20) >= 5 else np.nan
+    vol_60d = float(r60.std() * np.sqrt(252) * 100) if len(r60) >= 15 else np.nan
+    vol_down = float(downside.std() * np.sqrt(252) * 100) if len(downside) >= 5 else np.nan
+    max_dd = compute_max_drawdown(s.tail(252))
+    ret_63d = float((s.iloc[-1] / s.iloc[-64] - 1) * 100) if len(s) >= 64 else np.nan
+    ret_252d = float((s.iloc[-1] / s.iloc[-253] - 1) * 100) if len(s) >= 253 else np.nan
+
+    ref_vol = vol_60d if np.isfinite(vol_60d) else vol_20d
+    if not np.isfinite(ref_vol):
+        band = "Sin datos"
+    elif ref_vol < 20:
+        band = "Baja"
+    elif ref_vol < 35:
+        band = "Media"
+    else:
+        band = "Alta"
+
+    return {
+        "vol_20d": vol_20d,
+        "vol_60d": vol_60d,
+        "vol_downside": vol_down,
+        "max_dd_252": max_dd,
+        "ret_63d": ret_63d,
+        "ret_252d": ret_252d,
+        "risk_band": band,
+    }
+
+
+def clip01(x):
+    return np.clip(x, 0.0, 1.0)
+
+
+def confidence_level(conf):
+    if conf >= 0.20:
+        return "Alta"
+    if conf >= 0.08:
+        return "Media"
+    return "Baja"
+
+
+def signal_emoji(signal):
+    return {"SUBE": "🟢", "BAJA": "🔴", "ESPERAR": "🟡"}.get(signal, "⚪")
+
+
+def signal_weight(signal):
+    return {"SUBE": 1.0, "ESPERAR": 0.45, "BAJA": 0.0}.get(signal, 0.0)
+
+
+def normalize_weights_with_cap(score_series, total_weight, cap):
+    scores = pd.Series(score_series, dtype=float).clip(lower=0)
+    if scores.sum() <= 0 or total_weight <= 0:
+        return pd.Series(0.0, index=scores.index)
+
+    weights = scores / scores.sum() * total_weight
+    cap = float(max(cap, 0.01))
+
+    for _ in range(10):
+        over = weights > cap
+        if not over.any():
+            break
+        excess = float((weights[over] - cap).sum())
+        weights[over] = cap
+        under = ~over
+        if excess <= 0 or not under.any() or float(scores[under].sum()) <= 0:
+            break
+        redistribution = scores[under] / scores[under].sum() * excess
+        weights[under] += redistribution
+
+    if weights.sum() > 0:
+        weights = weights / weights.sum() * total_weight
+    return weights
+
+
+def infer_asset_count(amount, base_n):
+    if amount < 20000:
+        return min(2, base_n)
+    if amount < 60000:
+        return max(2, base_n)
+    return base_n + 1
+
+
+@st.cache_data(show_spinner=False)
+def scan_market(df_rs, tickers_all, horizon, paso, n_test, precisions, roll_acc_win, rsi_sell, rsi_buy, conf_min, warm, n_lags_morph):
+    rows = []
+    for ticker in tickers_all:
+        df_t = df_rs[df_rs["instrument_id"] == ticker].sort_values("date").copy()
+        res = run_gamma_backtest_for_ticker(
+            df_t=df_t,
+            horizon=horizon,
+            paso=paso,
+            n_test=int(n_test),
+            precisions=tuple(int(x) for x in precisions),
+            roll_acc_win=int(roll_acc_win),
+            rsi_sell=float(rsi_sell),
+            rsi_buy=float(rsi_buy),
+            conf_min=float(conf_min),
+            warm=int(warm),
+            n_lags_morph=int(n_lags_morph),
+        )
+        if res is None:
+            continue
+
+        vol = compute_volatility_snapshot(df_t)
+        quality = (
+            (res["met_F"]["hit_rate"] / 100.0) * 0.45
+            + clip01((res["err_metrics"]["R²"] + 0.25) / 1.25) * 0.25
+            + clip01((20 - max(res["err_metrics"]["SMAPE (%)"], 0)) / 20) * 0.20
+            + clip01((res["current_conf"] - 0.02) / 0.25) * 0.10
+        )
+        score = (
+            res["met_F"]["hit_rate"]
+            + res["met_F"]["sharpe"]
+            - 0.25 * res["err_metrics"]["SMAPE (%)"]
+            - 0.10 * res["err_metrics"]["MAPE (%)"]
+        )
+        rows.append({
+            "Emisora": ticker,
+            "Señal": res["current_signal"],
+            "Confianza num": float(res["current_conf"]),
+            "Confianza": confidence_level(res["current_conf"]),
+            "Acierto (%)": round(res["met_F"]["hit_rate"], 2),
+            "Sharpe": round(res["met_F"]["sharpe"], 3),
+            "Caída máxima estrategia (%)": round(res["met_F"]["max_dd"], 2),
+            "Cambio esperado (%)": round(res["expected_ret_pct"], 2),
+            "Precio actual": round(res["current_price"], 2),
+            "Precio estimado": round(res["projected_price"], 2),
+            "MAPE (%)": round(res["err_metrics"]["MAPE (%)"], 2),
+            "SMAPE (%)": round(res["err_metrics"]["SMAPE (%)"], 2),
+            "R²": round(res["err_metrics"]["R²"], 3),
+            "Volatilidad 20d (%)": round(vol["vol_20d"], 2) if pd.notna(vol["vol_20d"]) else np.nan,
+            "Volatilidad 60d (%)": round(vol["vol_60d"], 2) if pd.notna(vol["vol_60d"]) else np.nan,
+            "Volatilidad bajista (%)": round(vol["vol_downside"], 2) if pd.notna(vol["vol_downside"]) else np.nan,
+            "Drawdown 252d (%)": round(vol["max_dd_252"], 2) if pd.notna(vol["max_dd_252"]) else np.nan,
+            "Cambio 3 meses (%)": round(vol["ret_63d"], 2) if pd.notna(vol["ret_63d"]) else np.nan,
+            "Cambio 12 meses (%)": round(vol["ret_252d"], 2) if pd.notna(vol["ret_252d"]) else np.nan,
+            "Riesgo": vol["risk_band"],
+            "Puntaje modelo": round(score, 3),
+            "Calidad modelo": round(quality, 3),
+        })
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows).sort_values("Puntaje modelo", ascending=False).reset_index(drop=True)
+
+
+def score_assets_for_profile(market_df, profile_info, goal, horizon_days):
+    if market_df.empty:
+        return market_df.copy()
+
+    df = market_df.copy()
+    profile = profile_info["perfil"]
+
+    low_vol = clip01(1 - df["Volatilidad 60d (%)"].fillna(40) / 45)
+    conf = clip01(df["Confianza num"].fillna(0.0) / 0.25)
+    quality = clip01(df["Calidad modelo"].fillna(0.0))
+    expected_ret = clip01((df["Cambio esperado (%)"].fillna(0.0) + 5) / 20)
+    momentum = clip01((df["Cambio 3 meses (%)"].fillna(0.0) + 15) / 40)
+    signal = df["Señal"].map(signal_weight).fillna(0.0)
+
+    if profile == "Conservador":
+        suitability = 0.30 * signal + 0.28 * low_vol + 0.22 * quality + 0.12 * conf + 0.08 * expected_ret
+    elif profile == "Moderado":
+        suitability = 0.30 * signal + 0.22 * low_vol + 0.22 * quality + 0.14 * conf + 0.12 * expected_ret
+    else:
+        suitability = 0.28 * signal + 0.15 * low_vol + 0.20 * quality + 0.12 * conf + 0.25 * expected_ret
+
+    if goal == "Cuidar mi dinero":
+        suitability = suitability + 0.08 * low_vol
+    elif goal == "Hacer crecer mi inversión":
+        suitability = suitability + 0.06 * expected_ret + 0.04 * momentum
+    elif goal == "Buscar una oportunidad más agresiva":
+        suitability = suitability + 0.08 * expected_ret + 0.02 * conf
+
+    df["Puntaje perfil"] = np.round(suitability, 3)
+    df["Elegible"] = df["Señal"] != "BAJA"
+
+    if profile == "Conservador":
+        df.loc[df["Volatilidad 60d (%)"].fillna(99) > profile_info["umbral_volatilidad"], "Elegible"] = False
+        df.loc[df["Confianza num"] < 0.04, "Elegible"] = False
+    elif profile == "Moderado":
+        df.loc[df["Confianza num"] < 0.02, "Elegible"] = False
+
+    if horizon_days <= 10:
+        df.loc[df["Volatilidad 20d (%)"].fillna(99) > 45, "Elegible"] = False
+
+    return df.sort_values(["Elegible", "Puntaje perfil"], ascending=[False, False]).reset_index(drop=True)
+
+
+def build_personalized_portfolio(scored_df, df_rs, amount, profile_info, goal, horizon_days):
+    if scored_df.empty:
+        return {
+            "portfolio": pd.DataFrame(),
+            "validation": pd.DataFrame(),
+            "summary": {
+                "cash_pct": 1.0,
+                "portfolio_expected_ret": 0.0,
+                "portfolio_vol": np.nan,
+                "portfolio_conf": 0.0,
+                "selected_count": 0,
+                "profile": profile_info["perfil"],
+            },
+        }
+
+    profile = profile_info["perfil"]
+    cash_pct = profile_info["cash_base"]
+    if goal == "Cuidar mi dinero":
+        cash_pct += 0.10
+    elif goal == "Hacer crecer mi inversión":
+        cash_pct -= 0.05
+    elif goal == "Buscar una oportunidad más agresiva":
+        cash_pct -= 0.08
+    if horizon_days > 126:
+        cash_pct -= 0.05
+    if horizon_days <= 10:
+        cash_pct += 0.05
+    cash_pct = float(np.clip(cash_pct, 0.02, 0.50))
+
+    n_assets = infer_asset_count(amount, profile_info["n_base"])
+    cap_weight = profile_info["max_peso"] * (1 - cash_pct)
+
+    eligible = scored_df[scored_df["Elegible"]].copy()
+    if eligible.empty:
+        top = scored_df.head(1).copy()
+        eligible = top.assign(Elegible=False)
+        cash_pct = 1.0
+        invest_pct = 0.0
+    else:
+        invest_pct = 1 - cash_pct
+        eligible = eligible.head(n_assets).copy()
+
+    if invest_pct > 0:
+        weights = normalize_weights_with_cap(eligible["Puntaje perfil"], total_weight=invest_pct, cap=cap_weight)
+        eligible["Peso"] = weights.values
+    else:
+        eligible["Peso"] = 0.0
+
+    eligible["Monto sugerido"] = eligible["Peso"] * amount
+    eligible["Señal visual"] = eligible["Señal"].map(signal_emoji) + " " + eligible["Señal"]
+
+    cash_row = pd.DataFrame([{
+        "Emisora": "Efectivo / reserva",
+        "Señal": "RESERVA",
+        "Señal visual": "💵 RESERVA",
+        "Confianza": "-",
+        "Confianza num": np.nan,
+        "Puntaje perfil": np.nan,
+        "Peso": cash_pct,
+        "Monto sugerido": cash_pct * amount,
+        "Cambio esperado (%)": 0.0,
+        "Volatilidad 60d (%)": 0.0,
+        "Riesgo": "Bajo",
+    }])
+
+    portfolio = pd.concat([eligible, cash_row], ignore_index=True, sort=False)
+    portfolio["Peso (%)"] = portfolio["Peso"] * 100
+    portfolio = portfolio[[
+        "Emisora", "Señal visual", "Confianza", "Riesgo", "Cambio esperado (%)",
+        "Volatilidad 60d (%)", "Peso (%)", "Monto sugerido"
+    ]].rename(columns={
+        "Señal visual": "Señal",
+        "Cambio esperado (%)": f"Cambio esperado al horizonte (%)",
+        "Volatilidad 60d (%)": "Volatilidad reciente (%)",
+    })
+
+    asset_rows = portfolio[portfolio["Emisora"] != "Efectivo / reserva"].copy()
+    selected_assets = asset_rows["Emisora"].tolist()
+
+    portfolio_expected_ret = float(asset_rows[f"Cambio esperado al horizonte (%)"].fillna(0).mul(asset_rows["Peso (%)"] / 100).sum())
+    portfolio_conf = float(scored_df.set_index("Emisora").loc[selected_assets, "Confianza num"].fillna(0).mul(asset_rows["Peso (%)"] / 100).sum()) if selected_assets else 0.0
+
+    portfolio_vol = np.nan
+    if selected_assets:
+        wide = df_rs[df_rs["instrument_id"].isin(selected_assets)].pivot(index="date", columns="instrument_id", values="adj_close").sort_index()
+        rets = wide.pct_change().dropna().tail(252)
+        if not rets.empty:
+            weights = asset_rows.set_index("Emisora")["Peso (%)"] / 100
+            weights = weights.reindex(rets.columns).fillna(0.0)
+            cov = rets.cov() * 252
+            port_var = float(np.dot(weights.values, np.dot(cov.values, weights.values)))
+            portfolio_vol = np.sqrt(max(port_var, 0)) * 100
+
+    max_weight_pct = float(asset_rows["Peso (%)"].max()) if not asset_rows.empty else 0.0
+    risk_ok = pd.isna(portfolio_vol) or portfolio_vol <= profile_info["umbral_volatilidad"]
+    cash_ok = cash_pct >= max(0.0, profile_info["cash_base"] - 0.05)
+    concentration_ok = max_weight_pct <= profile_info["max_peso"] * 100 + 2
+    diversification_ok = len(selected_assets) >= min(2, infer_asset_count(amount, profile_info["n_base"])) or amount < 20000
+    no_baja_ok = "BAJA" not in scored_df.set_index("Emisora").reindex(selected_assets)["Señal"].fillna("").tolist()
+
+    validation = pd.DataFrame([
+        {
+            "Chequeo": "Riesgo acorde a tu perfil",
+            "Resultado": "✅ Sí" if risk_ok else "⚠️ Revisar",
+            "Detalle": f"Volatilidad estimada del portafolio: {fmt_pct(portfolio_vol, 2)}. Límite de referencia para tu perfil: {profile_info['umbral_volatilidad']}%."
+        },
+        {
+            "Chequeo": "Reserva de efectivo suficiente",
+            "Resultado": "✅ Sí" if cash_ok else "⚠️ Revisar",
+            "Detalle": f"Reserva sugerida: {fmt_pct(cash_pct * 100, 1)} del total."
+        },
+        {
+            "Chequeo": "Concentración razonable",
+            "Resultado": "✅ Sí" if concentration_ok else "⚠️ Revisar",
+            "Detalle": f"Peso máximo en una sola emisora: {fmt_pct(max_weight_pct, 1)}."
+        },
+        {
+            "Chequeo": "Diversificación mínima",
+            "Resultado": "✅ Sí" if diversification_ok else "⚠️ Revisar",
+            "Detalle": f"Emisoras seleccionadas: {len(selected_assets)}."
+        },
+        {
+            "Chequeo": "Evita señales claramente negativas",
+            "Resultado": "✅ Sí" if no_baja_ok else "⚠️ Revisar",
+            "Detalle": "La cartera propuesta evita activos con señal BAJA cuando fue posible."
+        },
+    ])
+
+    return {
+        "portfolio": portfolio,
+        "validation": validation,
+        "summary": {
+            "cash_pct": cash_pct,
+            "portfolio_expected_ret": portfolio_expected_ret,
+            "portfolio_vol": portfolio_vol,
+            "portfolio_conf": portfolio_conf,
+            "selected_count": len(selected_assets),
+            "profile": profile,
+        },
+    }
+
+
 # ===================== AYUDAS VISUALES =====================
 def fmt_num(x, dec=2):
     if pd.isna(x):
         return "-"
     return f"{x:,.{dec}f}"
 
+
 def fmt_pct(x, dec=2):
     if pd.isna(x):
         return "-"
     return f"{x:.{dec}f}%"
+
 
 def estado_color(signal):
     if signal == "SUBE":
@@ -486,12 +903,14 @@ def estado_color(signal):
         return "🔴"
     return "🟡"
 
+
 def confianza_texto(conf):
     if conf >= 0.20:
         return "Alta"
     if conf >= 0.08:
         return "Media"
     return "Baja"
+
 
 def explicar_error_simple(m):
     return (
@@ -500,8 +919,10 @@ def explicar_error_simple(m):
         f"Ajuste general (R²): {fmt_num(m['R²'], 3)}"
     )
 
+
 def help_box(text):
     st.info(text)
+
 
 # ===================== CARGA =====================
 try:
@@ -510,9 +931,80 @@ except Exception as e:
     st.error(f"No pude leer el archivo de datos en '{DATA_PATH}': {e}")
     st.stop()
 
-# ===================== CONTROLES =====================
-st.sidebar.title("Configuración")
-st.sidebar.caption("Puedes dejar estos valores como están si solo quieres explorar.")
+
+# ===================== ESTADO DE PERFIL =====================
+def set_default_state():
+    defaults = {
+        "monto_inversion": 50000,
+        "horizonte_valor": 2,
+        "horizonte_unidad": "Semanas",
+        "tolerancia_riesgo": 3,
+        "objetivo_inversion": "Balance entre crecimiento y estabilidad",
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+
+set_default_state()
+
+
+# ===================== SIDEBAR =====================
+st.sidebar.title("Tu perfil de inversión")
+st.sidebar.caption("Llena este formulario para que el panel adapte el horizonte, el perfil y la cartera sugerida.")
+
+with st.sidebar.form("perfil_usuario_form"):
+    monto_inversion = st.number_input("Monto a invertir", min_value=1000, value=int(st.session_state["monto_inversion"]), step=1000)
+    horizonte_valor = st.number_input("Horizonte de inversión", min_value=1, value=int(st.session_state["horizonte_valor"]), step=1)
+    horizonte_unidad = st.selectbox(
+        "Unidad del horizonte",
+        options=["Días hábiles", "Semanas", "Meses"],
+        index=["Días hábiles", "Semanas", "Meses"].index(st.session_state["horizonte_unidad"]),
+    )
+    tolerancia_riesgo = st.slider("¿Qué tanto riesgo aceptas?", min_value=1, max_value=5, value=int(st.session_state["tolerancia_riesgo"]), help="1 = muy poco, 5 = alto")
+    objetivo_inversion = st.selectbox(
+        "¿Qué quieres lograr con tu inversión?",
+        options=[
+            "Cuidar mi dinero",
+            "Balance entre crecimiento y estabilidad",
+            "Hacer crecer mi inversión",
+            "Buscar una oportunidad más agresiva",
+        ],
+        index=[
+            "Cuidar mi dinero",
+            "Balance entre crecimiento y estabilidad",
+            "Hacer crecer mi inversión",
+            "Buscar una oportunidad más agresiva",
+        ].index(st.session_state["objetivo_inversion"]),
+    )
+    profile_submit = st.form_submit_button("Aplicar perfil")
+
+if profile_submit:
+    st.session_state["monto_inversion"] = monto_inversion
+    st.session_state["horizonte_valor"] = horizonte_valor
+    st.session_state["horizonte_unidad"] = horizonte_unidad
+    st.session_state["tolerancia_riesgo"] = tolerancia_riesgo
+    st.session_state["objetivo_inversion"] = objetivo_inversion
+
+selected_horizon_days = horizon_to_business_days(st.session_state["horizonte_valor"], st.session_state["horizonte_unidad"])
+selected_horizon_label = human_horizon_label(st.session_state["horizonte_valor"], st.session_state["horizonte_unidad"])
+profile_info = classify_investor_profile(
+    amount=float(st.session_state["monto_inversion"]),
+    horizon_days=selected_horizon_days,
+    risk_tolerance=int(st.session_state["tolerancia_riesgo"]),
+    goal=st.session_state["objetivo_inversion"],
+)
+
+st.sidebar.success(
+    f"Perfil detectado: {profile_info['perfil']}\n\n"
+    f"Horizonte usado por el modelo: {selected_horizon_days} días hábiles\n\n"
+    f"Objetivo: {st.session_state['objetivo_inversion']}"
+)
+st.sidebar.caption(profile_info["descripcion"])
+
+st.sidebar.markdown("---")
+st.sidebar.title("Configuración técnica")
+st.sidebar.caption("Estos ajustes ayudan al modelo. Si no estás seguro, puedes dejarlos como están.")
 
 with st.sidebar.expander("Ajustes avanzados del modelo"):
     n_test = st.number_input("Pruebas históricas", min_value=20, value=DEFAULT_N_TEST, step=5)
@@ -524,25 +1016,28 @@ with st.sidebar.expander("Ajustes avanzados del modelo"):
     roll_acc_win = st.number_input("Ventana de evaluación interna", min_value=3, value=10, step=1)
     rsi_sell = st.number_input("Límite RSI para señal de baja", min_value=1, max_value=99, value=22, step=1)
     rsi_buy = st.number_input("Límite RSI para señal de subida", min_value=1, max_value=99, value=72, step=1)
-    conf_min = st.number_input("Confianza mínima para marcar 'esperar'", min_value=0.0, value=0.04, step=0.01)
+    conf_min = st.number_input("Confianza mínima para marcar 'esperar'", min_value=0.0, value=DEFAULT_CONF_MIN, step=0.01)
+
 
 # ===================== PREPROCESO =====================
 df_rs = resample_ohlcv(raw, freq=FIXED_FREQ)
 wide = wide_prices(df_rs)
 tickers_all = sorted(df_rs["instrument_id"].unique().tolist())
+step_for_model = int(max(5, min(selected_horizon_days, 21)))
 
-st.title("Panel simple de análisis bursátil")
+st.title("Panel de estrategias de inversión personalizadas")
 st.caption(
-    "Esta versión conserva el motor Gamma, pero presenta los resultados de forma más clara. "
-    "El objetivo es que cualquier persona entienda qué pasó con el precio, qué estima el modelo y cómo comparar emisoras."
+    "Ahora el panel no solo analiza emisoras: también usa tu monto, horizonte, nivel de riesgo y objetivo para construir una recomendación más cercana a tu perfil."
 )
 
 help_box(
+    f"Perfil actual: {profile_info['perfil']} | Horizonte definido por el usuario: {selected_horizon_label} "
+    f"({selected_horizon_days} días hábiles).\n"
     "Qué significa cada señal: 🟢 SUBE = el modelo espera un aumento, 🔴 BAJA = espera una caída, "
     "🟡 ESPERAR = no hay suficiente claridad para tomar una dirección."
 )
 
-tabs = st.tabs(["Vista general", "Entender una emisora", "Pronóstico", "Comparativo"])
+tabs = st.tabs(["Vista general", "Entender una emisora", "Pronóstico", "Comparativo", "Mi perfil y cartera"])
 
 # ---------- TAB 1 ----------
 with tabs[0]:
@@ -600,7 +1095,7 @@ with tabs[0]:
 # ---------- TAB 2 ----------
 with tabs[1]:
     st.subheader("Entender una emisora")
-    st.caption("Esta sección sirve para ver una sola emisora con más detalle.")
+    st.caption("Esta sección sirve para ver una sola emisora con más detalle, incluyendo su volatilidad reciente.")
 
     if not tickers_all:
         st.info("No hay emisoras suficientes para analizar.")
@@ -616,18 +1111,16 @@ with tabs[1]:
             with c1:
                 fig = go.Figure()
                 fig.add_scatter(x=y.index, y=y.values, mode="lines", name="Precio")
-                fig.update_layout(
-                    title=f"Evolución del precio de {t}",
-                    xaxis_title="Fecha",
-                    yaxis_title="Precio"
-                )
+                fig.update_layout(title=f"Evolución del precio de {t}", xaxis_title="Fecha", yaxis_title="Precio")
                 st.plotly_chart(fig, width="stretch")
             with c2:
                 ret_1d = y.pct_change().dropna() * 100
+                vol_info = compute_volatility_snapshot(dt)
                 st.markdown("### Resumen rápido")
                 st.metric("Datos observados", int(y.shape[0]))
                 st.metric("Precio promedio", fmt_num(float(y.mean()), 2))
                 st.metric("Cambio diario promedio", fmt_pct(float(ret_1d.mean()) if len(ret_1d) else np.nan, 2))
+                st.metric("Riesgo reciente", vol_info["risk_band"])
                 st.caption(f"Periodo analizado: {y.index.min().date()} a {y.index.max().date()}")
 
             feats = dt.copy()
@@ -640,19 +1133,30 @@ with tabs[1]:
             fig2 = px.line(
                 feats.melt(
                     id_vars="date",
-                    value_vars=["Fuerza del movimiento (RSI)", "Posición dentro de banda", "Volatilidad reciente (%)"]
+                    value_vars=["Fuerza del movimiento (RSI)", "Posición dentro de banda", "Volatilidad reciente (%)"],
                 ),
                 x="date",
                 y="value",
                 color="variable",
-                title="Comportamiento reciente de los indicadores"
+                title="Comportamiento reciente de los indicadores",
             )
             st.plotly_chart(fig2, width="stretch")
+
+            st.markdown("### Módulo de volatilidad")
+            vol_info = compute_volatility_snapshot(dt)
+            v1, v2, v3, v4 = st.columns(4)
+            v1.metric("Volatilidad 20 días", fmt_pct(vol_info["vol_20d"], 2))
+            v2.metric("Volatilidad 60 días", fmt_pct(vol_info["vol_60d"], 2))
+            v3.metric("Volatilidad bajista", fmt_pct(vol_info["vol_downside"], 2))
+            v4.metric("Caída máxima 252 días", fmt_pct(vol_info["max_dd_252"], 2))
+            help_box(
+                "Aquí la volatilidad se usa como medida formal de riesgo reciente. Mientras más alta sea, más bruscos han sido los movimientos del precio."
+            )
 
 # ---------- TAB 3 ----------
 with tabs[2]:
     st.subheader("Pronóstico de una emisora")
-    st.caption("El modelo estima qué podría pasar en aproximadamente 2 semanas hábiles.")
+    st.caption(f"El modelo usa el horizonte elegido por el usuario: {selected_horizon_label}.")
 
     if not tickers_all:
         st.info("No hay emisoras suficientes para modelar.")
@@ -663,8 +1167,8 @@ with tabs[2]:
         with st.spinner("Analizando la emisora..."):
             res = run_gamma_backtest_for_ticker(
                 df_t=df_t,
-                horizon=FIXED_HORIZON,
-                paso=FIXED_STEP,
+                horizon=selected_horizon_days,
+                paso=step_for_model,
                 n_test=int(n_test),
                 precisions=(int(pA), int(pB), int(pC)),
                 roll_acc_win=int(roll_acc_win),
@@ -676,7 +1180,7 @@ with tabs[2]:
             )
 
         if res is None:
-            st.warning("No hay suficientes datos para generar el análisis con la configuración actual.")
+            st.warning("No hay suficientes datos para generar el análisis con la configuración actual y ese horizonte.")
         else:
             st.success(
                 f"{estado_color(res['current_signal'])} Señal actual: {res['current_signal']} | "
@@ -727,7 +1231,7 @@ with tabs[2]:
                 x="Fecha",
                 y="Cambio acumulado (%)",
                 color="Serie",
-                title="Comparación del desempeño acumulado"
+                title="Comparación del desempeño acumulado",
             )
             st.plotly_chart(fig_curve, width="stretch")
 
@@ -742,7 +1246,7 @@ with tabs[2]:
                 x="Fecha",
                 y="Precio",
                 color="Serie",
-                title="Precio real vs precio estimado"
+                title="Precio real vs precio estimado",
             )
             st.plotly_chart(fig_price, width="stretch")
 
@@ -761,20 +1265,20 @@ with tabs[2]:
 # ---------- TAB 4 ----------
 with tabs[3]:
     st.subheader("Comparativo entre emisoras")
-    st.caption("Se ordenan según desempeño reciente del modelo y calidad del pronóstico.")
+    st.caption(
+        "Se ordenan según el desempeño reciente del modelo y el horizonte seleccionado por el usuario. "
+        "Este ranking todavía es técnico; la recomendación personalizada está en la pestaña siguiente."
+    )
 
     if not tickers_all:
         st.info("No hay emisoras suficientes.")
     else:
-        results = []
-        progress = st.progress(0.0, text="Analizando emisoras...")
-
-        for i, ticker in enumerate(tickers_all):
-            df_t = df_rs[df_rs["instrument_id"] == ticker].sort_values("date").copy()
-            res = run_gamma_backtest_for_ticker(
-                df_t=df_t,
-                horizon=FIXED_HORIZON,
-                paso=FIXED_STEP,
+        with st.spinner("Analizando emisoras..."):
+            market_scan = scan_market(
+                df_rs=df_rs,
+                tickers_all=tuple(tickers_all),
+                horizon=selected_horizon_days,
+                paso=step_for_model,
                 n_test=int(n_test),
                 precisions=(int(pA), int(pB), int(pC)),
                 roll_acc_win=int(roll_acc_win),
@@ -785,52 +1289,137 @@ with tabs[3]:
                 n_lags_morph=int(n_lags_morph),
             )
 
-            if res is not None:
-                score = (
-                    res["met_F"]["hit_rate"]
-                    + res["met_F"]["sharpe"]
-                    - 0.25 * res["err_metrics"]["SMAPE (%)"]
-                    - 0.10 * res["err_metrics"]["MAPE (%)"]
-                )
-                results.append({
-                    "Emisora": ticker,
-                    "Señal": res["current_signal"],
-                    "Confianza": confianza_texto(res["current_conf"]),
-                    "Acierto (%)": round(res["met_F"]["hit_rate"], 2),
-                    "Caída máxima (%)": round(res["met_F"]["max_dd"], 2),
-                    "Cambio esperado (%)": round(res["expected_ret_pct"], 2),
-                    "Precio estimado": round(res["projected_price"], 2),
-                    "Error porcentual (%)": round(res["err_metrics"]["MAPE (%)"], 2),
-                    "R²": round(res["err_metrics"]["R²"], 3),
-                    "Score": round(score, 3),
-                })
-
-            progress.progress((i + 1) / len(tickers_all), text=f"Analizando emisoras... {i + 1}/{len(tickers_all)}")
-
-        progress.empty()
-
-        if not results:
+        if market_scan.empty:
             st.warning("No se pudo generar el comparativo con la configuración actual.")
         else:
-            rank = pd.DataFrame(results).sort_values("Score", ascending=False).reset_index(drop=True)
-            st.dataframe(rank, width="stretch")
+            rank = market_scan.sort_values("Puntaje modelo", ascending=False).reset_index(drop=True)
+            st.dataframe(rank[[
+                "Emisora", "Señal", "Confianza", "Acierto (%)", "Cambio esperado (%)",
+                "Volatilidad 60d (%)", "MAPE (%)", "R²", "Puntaje modelo"
+            ]], width="stretch")
 
             st.markdown("### Top 5")
             top5 = rank.head(5)
-            st.dataframe(top5, width="stretch")
+            st.dataframe(top5[["Emisora", "Señal", "Acierto (%)", "Cambio esperado (%)", "Volatilidad 60d (%)", "Puntaje modelo"]], width="stretch")
 
             fig_top = go.Figure()
             fig_top.add_bar(x=top5["Emisora"], y=top5["Acierto (%)"], name="Acierto (%)")
-            fig_top.add_bar(x=top5["Emisora"], y=top5["Error porcentual (%)"], name="Error (%)")
+            fig_top.add_bar(x=top5["Emisora"], y=top5["Volatilidad 60d (%)"], name="Volatilidad 60d (%)")
             fig_top.update_layout(
                 barmode="group",
-                title="Top 5: acierto del modelo vs error del pronóstico",
+                title="Top 5: acierto del modelo vs volatilidad reciente",
                 xaxis_title="Emisora",
-                yaxis_title="Valor"
+                yaxis_title="Valor",
             )
             st.plotly_chart(fig_top, width="stretch")
 
             help_box(
                 "Una emisora mejor posicionada suele combinar mayor acierto, menor error y una expectativa más favorable. "
-                "Aun así, el ranking es una ayuda de análisis, no una garantía de inversión."
+                "Aun así, el ranking técnico no reemplaza la cartera personalizada."
             )
+
+# ---------- TAB 5 ----------
+with tabs[4]:
+    st.subheader("Mi perfil y cartera sugerida")
+    st.caption(
+        "Aquí se integra lo que pedía el protocolo: formulario del usuario, clasificación de perfil, horizonte dependiente de la persona, "
+        "recomendación de cartera y validación funcional de si la propuesta sí encaja contigo."
+    )
+
+    if not tickers_all:
+        st.info("No hay emisoras suficientes.")
+    else:
+        with st.spinner("Construyendo recomendación personalizada..."):
+            market_scan = scan_market(
+                df_rs=df_rs,
+                tickers_all=tuple(tickers_all),
+                horizon=selected_horizon_days,
+                paso=step_for_model,
+                n_test=int(n_test),
+                precisions=(int(pA), int(pB), int(pC)),
+                roll_acc_win=int(roll_acc_win),
+                rsi_sell=float(rsi_sell),
+                rsi_buy=float(rsi_buy),
+                conf_min=float(conf_min),
+                warm=int(warm),
+                n_lags_morph=int(n_lags_morph),
+            )
+
+        if market_scan.empty:
+            st.warning("No se pudo construir la recomendación con la configuración actual.")
+        else:
+            scored_assets = score_assets_for_profile(
+                market_df=market_scan,
+                profile_info=profile_info,
+                goal=st.session_state["objetivo_inversion"],
+                horizon_days=selected_horizon_days,
+            )
+            portfolio_pack = build_personalized_portfolio(
+                scored_df=scored_assets,
+                df_rs=df_rs,
+                amount=float(st.session_state["monto_inversion"]),
+                profile_info=profile_info,
+                goal=st.session_state["objetivo_inversion"],
+                horizon_days=selected_horizon_days,
+            )
+
+            c1, c2 = st.columns([1.1, 1.4])
+            with c1:
+                st.markdown("### 1) Tu perfil detectado")
+                st.metric("Perfil", profile_info["perfil"])
+                st.metric("Puntaje de perfil", fmt_num(profile_info["puntaje"], 2))
+                st.metric("Monto analizado", fmt_num(float(st.session_state["monto_inversion"]), 0))
+                st.metric("Horizonte usado", f"{selected_horizon_days} días hábiles")
+                st.info(profile_info["descripcion"])
+
+            with c2:
+                st.markdown("### 2) Resumen de la propuesta")
+                s1, s2, s3, s4 = st.columns(4)
+                s1.metric("Emisoras sugeridas", portfolio_pack["summary"]["selected_count"])
+                s2.metric("Reserva sugerida", fmt_pct(portfolio_pack["summary"]["cash_pct"] * 100, 1))
+                s3.metric("Cambio esperado cartera", fmt_pct(portfolio_pack["summary"]["portfolio_expected_ret"], 2))
+                s4.metric("Volatilidad estimada", fmt_pct(portfolio_pack["summary"]["portfolio_vol"], 2))
+                st.caption(
+                    f"Confianza promedio ponderada de la cartera: {confianza_texto(portfolio_pack['summary']['portfolio_conf'])}."
+                )
+
+            st.markdown("### 3) Distribución sugerida del dinero")
+            portfolio_df = portfolio_pack["portfolio"].copy()
+            st.dataframe(portfolio_df, width="stretch")
+
+            pie_df = portfolio_df[["Emisora", "Peso (%)"]].copy()
+            pie_df = pie_df[pie_df["Peso (%)"] > 0]
+            fig_pie = px.pie(pie_df, names="Emisora", values="Peso (%)", title="Cómo repartir el dinero según tu perfil")
+            st.plotly_chart(fig_pie, width="stretch")
+
+            st.markdown("### 4) Por qué se eligieron estas emisoras")
+            explain_cols = [
+                "Emisora", "Señal", "Confianza", "Riesgo", "Cambio esperado (%)", "Volatilidad 60d (%)", "Puntaje perfil"
+            ]
+            st.dataframe(scored_assets[explain_cols].head(8), width="stretch")
+            help_box(
+                "El puntaje de perfil combina la señal del modelo, la confianza, la volatilidad reciente, el cambio esperado y tu objetivo personal."
+            )
+
+            st.markdown("### 5) Validación orientada al usuario")
+            st.dataframe(portfolio_pack["validation"], width="stretch")
+            help_box(
+                "Esta validación no solo revisa si el modelo predice bien, también verifica si la cartera respeta el tipo de usuario que dijiste ser."
+            )
+
+            st.markdown("### 6) Interpretación sencilla")
+            interp = [
+                f"Tu perfil se clasificó como {profile_info['perfil'].lower()}.",
+                f"El análisis se hizo para un horizonte de {selected_horizon_label.lower()}.",
+                f"La cartera sugiere mantener aproximadamente {fmt_pct(portfolio_pack['summary']['cash_pct'] * 100, 1)} en reserva.",
+            ]
+            if portfolio_pack["summary"]["selected_count"] > 0:
+                interp.append(
+                    f"El resto se distribuye entre {portfolio_pack['summary']['selected_count']} emisora(s) con mejor compatibilidad entre señal, riesgo y objetivo."
+                )
+            if pd.notna(portfolio_pack["summary"]["portfolio_vol"]):
+                if portfolio_pack["summary"]["portfolio_vol"] <= profile_info["umbral_volatilidad"]:
+                    interp.append("La volatilidad estimada está dentro de lo esperable para tu perfil.")
+                else:
+                    interp.append("La volatilidad estimada rebasa lo ideal para tu perfil, así que conviene revisar la propuesta o aumentar la reserva.")
+            st.write(" ".join(interp))
