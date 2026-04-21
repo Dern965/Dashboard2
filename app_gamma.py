@@ -43,7 +43,7 @@ def load_prices(path, date_col, ticker_col, price_col, file_mtime):
     if date_col not in df.columns:
         raise ValueError(f"No encontré la columna de fecha: {date_col}")
 
-    df[date_col] = pd.to_datetime(df[date_col], errors="coerce", dayfirst=True)
+    df[date_col] = pd.to_datetime(df[date_col], errors="coerce", format="%Y-%m-%d")
 
     rename_map = {date_col: "date", ticker_col: "instrument_id", price_col: "adj_close"}
     if "high" in df.columns:
