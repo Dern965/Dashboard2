@@ -1,6 +1,9 @@
 import warnings
 warnings.filterwarnings("ignore")
 
+import os
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -29,9 +32,19 @@ SEASONAL_PRIOR = {
 }
 
 # ===================== UTILIDADES BÁSICAS =====================
+def get_file_mtime(path):
+    return os.path.getmtime(path)
+
+
 @st.cache_data
-def load_prices(path, date_col, ticker_col, price_col):
-    df = pd.read_csv(path, parse_dates=[date_col])
+def load_prices(path, date_col, ticker_col, price_col, file_mtime):
+    df = pd.read_csv(path)
+
+    if date_col not in df.columns:
+        raise ValueError(f"No encontré la columna de fecha: {date_col}")
+
+    df[date_col] = pd.to_datetime(df[date_col], errors="coerce", dayfirst=True)
+
     rename_map = {date_col: "date", ticker_col: "instrument_id", price_col: "adj_close"}
     if "high" in df.columns:
         rename_map["high"] = "high"
@@ -53,12 +66,13 @@ def load_prices(path, date_col, ticker_col, price_col):
     if "volume" not in df.columns:
         df["volume"] = 1.0
 
+    df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.normalize()
+    df["instrument_id"] = df["instrument_id"].astype(str).str.strip()
+
     keep = ["date", "instrument_id", "adj_close", "high", "low", "volume"]
-    return (
-        df[keep]
-        .dropna(subset=["date", "instrument_id", "adj_close"])
-        .sort_values(["instrument_id", "date"])
-    )
+    out = df[keep].dropna(subset=["date", "instrument_id", "adj_close"]).copy()
+    out = out.sort_values(["instrument_id", "date"]).drop_duplicates(subset=["instrument_id", "date"], keep="last")
+    return out
 
 
 def resample_ohlcv(df, freq="B"):
@@ -926,8 +940,14 @@ def help_box(text):
 
 
 # ===================== CARGA =====================
+if st.sidebar.button("Recargar archivo de datos"):
+    st.cache_data.clear()
+    st.rerun()
+
 try:
-    raw = load_prices(DATA_PATH, DATE_COL, TICKER_COL, PRICE_COL)
+    data_file_mtime = get_file_mtime(DATA_PATH)
+    raw = load_prices(DATA_PATH, DATE_COL, TICKER_COL, PRICE_COL, data_file_mtime)
+    data_file_updated = pd.to_datetime(data_file_mtime, unit="s")
 except Exception as e:
     st.error(f"No pude leer el archivo de datos en '{DATA_PATH}': {e}")
     st.stop()
@@ -1001,6 +1021,14 @@ st.sidebar.success(
     f"Objetivo: {st.session_state['objetivo_inversion']}"
 )
 st.sidebar.caption(profile_info["descripcion"])
+
+ultima_fecha_global = pd.to_datetime(raw["date"].max()).date()
+primera_fecha_global = pd.to_datetime(raw["date"].min()).date()
+st.sidebar.info(
+    f"Archivo leído: {Path(DATA_PATH).name}\n\n"
+    f"Última actualización del archivo: {data_file_updated.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+    f"Rango de fechas cargado: {primera_fecha_global} a {ultima_fecha_global}"
+)
 
 st.sidebar.markdown("---")
 st.sidebar.title("Configuración técnica")
