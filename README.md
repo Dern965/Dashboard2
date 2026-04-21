@@ -43,6 +43,7 @@ Instala las dependencias del proyecto con:
 ```bash
 pip install -r requirements.txt
 ```
+
 ---
 
 ## 🚀 Ejecución
@@ -163,6 +164,70 @@ El sistema ahora se basa en el modelo **Gamma**, diseñado para generar predicci
 
 ---
 
+## 🤖 Actualización automática de datos (GitHub Actions)
+
+El proyecto incluye un pipeline de **actualización incremental automática** que se ejecuta **todos los días hábiles a las 7:00 AM (hora Ciudad de México)** sin que necesites hacer nada manualmente.
+
+### ¿Cómo funciona?
+
+```
+Cada día hábil 7:00 AM CDMX
+        │
+GitHub Actions (servidores de GitHub)
+        │
+   update_data.py
+        │
+   Lee market_prices.csv → detecta la última fecha de cada ticker
+        │
+   Descarga SOLO los días nuevos desde yfinance (incremental)
+        │
+   Combina + elimina duplicados
+        │
+   git commit + push automático al repositorio
+```
+
+### ¿Necesito herramientas externas o de pago?
+
+**No.** GitHub Actions está incluido en tu cuenta de GitHub sin costo adicional.
+
+| Herramienta | ¿Necesaria? | Costo |
+|---|---|---|
+| GitHub Actions | ✅ Sí | Gratis (incluido en GitHub) |
+| Servidor propio / VPS | ❌ No | — |
+| Servicios como Railway, Heroku, etc. | ❌ No | — |
+
+> **Nota:** Los repositorios privados tienen 2,000 minutos gratuitos al mes. Este workflow consume ~110 minutos al mes (5 min × 22 días hábiles), bien dentro del límite.
+
+### Activación (2 pasos)
+
+**Paso 1 — Dar permisos de escritura al workflow:**
+
+1. Ve a tu repositorio en GitHub
+2. `Settings` → `Actions` → `General`
+3. Baja hasta **"Workflow permissions"**
+4. Selecciona ✅ **"Read and write permissions"**
+5. Clic en **Save**
+
+**Paso 2 — Verificar la ruta del archivo:**
+
+El archivo `update_data.yml` debe estar exactamente en `.github/workflows/update_data.yml` dentro del repositorio.
+
+### Probar manualmente
+
+Para ejecutar el workflow sin esperar al horario automático:
+
+1. Ve a la pestaña **"Actions"** de tu repositorio en GitHub
+2. Selecciona **"📈 Actualización diaria de datos BMV"**
+3. Clic en **"Run workflow"** → **"Run workflow"**
+
+También puedes correrlo localmente:
+
+```bash
+python update_data.py
+```
+
+---
+
 ## 🧪 Recomendaciones de uso
 
 - Asegúrate de que los datos estén ordenados por fecha.
@@ -181,18 +246,24 @@ El sistema ahora se basa en el modelo **Gamma**, diseñado para generar predicci
 | ⚠️ Serie vacía | El ticker no tiene suficientes datos | Revisa el contenido del CSV |
 | ❗ Error al calcular métricas | Muy pocas observaciones para evaluar | Usa una serie más larga |
 | 📉 Predicción poco estable | Datos insuficientes o incompletos | Agrega más historial y valida columnas auxiliares |
+| 🔄 El workflow no hace commit | Sin permisos de escritura en Actions | Ver **Paso 1** de la sección de activación |
+| 🔄 El workflow no aparece en Actions | Archivo en ruta incorrecta | Mover a `.github/workflows/update_data.yml` |
 
 ---
 
-## 🧱 Estructura sugerida del proyecto
+## 🧱 Estructura del proyecto
 
 ```txt
 .
-├── app_gamma.py
+├── app_gamma.py                        ← Aplicación Streamlit
+├── update_data.py                      ← Script de actualización diaria
 ├── requirements.txt
 ├── README.md
-└── datos/
-    └── market_prices.csv
+├── datos/
+│   ├── market_prices.csv               ← Se actualiza automáticamente
+│   └── update.log                      ← Log de cada ejecución
+└── .github/
+    └── workflows/
+        └── update_data.yml             ← Workflow de GitHub Actions
 ```
 
----
