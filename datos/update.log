@@ -1,0 +1,50 @@
+2026-04-21 05:04:35,109 [INFO] ============================================================
+2026-04-21 05:04:35,109 [INFO]   ACTUALIZACIÓN DIARIA DE DATOS — 2026-04-21 05:04 UTC
+2026-04-21 05:04:35,109 [INFO] ============================================================
+2026-04-21 05:04:35,109 [INFO] Leyendo CSV existente: datos/market_prices.csv
+2026-04-21 05:04:35,221 [INFO] Tickers detectados: 34
+2026-04-21 05:04:35,236 [INFO] Fecha hoy (CDMX): 2026-04-20
+2026-04-21 05:04:35,236 [INFO]   [AC_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:35,236 [INFO]   [ALPEKA_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:35,236 [INFO]   [ALSEA_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:35,237 [INFO]   [AMXB_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:35,237 [INFO]   [ASURB_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:35,237 [INFO]   [BBAJIOO_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:35,237 [INFO]   [BIMBOA_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:35,237 [INFO]   [BOLSAA_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:35,237 [INFO]   [CEMEXCPO_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:35,237 [INFO]   [CUERVO_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:35,237 [INFO]   [ELEKTRA_MX] Descargando desde 2026-04-18 → ELEKTRA.MX
+2026-04-21 05:04:35,470 [INFO]   [ELEKTRA_MX] +1 filas nuevas ✓
+2026-04-21 05:04:36,271 [INFO]   [FEMSAUBD_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:36,271 [INFO]   [GAPB_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:36,271 [INFO]   [GCARSOA1_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:36,271 [INFO]   [GCC_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:36,271 [INFO]   [GFINBURO_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:36,271 [INFO]   [GFNORTEO_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:36,271 [INFO]   [GMEXICOB_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:36,271 [INFO]   [GRUMAB_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:36,271 [INFO]   [KIMBERA_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:36,271 [INFO]   [KOFUBL_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:36,271 [INFO]   [LABB_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:36,271 [INFO]   [LIVEPOLC-1_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:36,271 [INFO]   [MEGACPO_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:36,271 [INFO]   [OMAB_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:36,271 [INFO]   [ORBIA_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:36,272 [INFO]   [PE&OLES_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:36,272 [INFO]   [PINFRAL_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:36,272 [INFO]   [Q_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:36,272 [INFO]   [RA_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:36,272 [INFO]   [TLEVISACPO_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:36,272 [INFO]   [VESTA_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:36,272 [INFO]   [VOLARA_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:36,272 [INFO]   [WALMEX_MX] Ya está al día (2026-04-20) — omitido
+2026-04-21 05:04:36,903 [INFO] 
+✅ CSV actualizado: datos/market_prices.csv  (180,188 filas totales, +1 nuevas)
+2026-04-21 05:04:36,904 [INFO] 
+── Resumen ──────────────────────────────────────
+2026-04-21 05:04:36,904 [INFO]   Tickers actualizados: 1
+2026-04-21 05:04:36,904 [INFO]   Tickers sin cambios:  33
+2026-04-21 05:04:36,904 [INFO]   Tickers con error:    0
+2026-04-21 05:04:36,904 [INFO]   Filas nuevas totales: 1
+2026-04-21 05:04:36,904 [INFO] ──────────────────────────────────────────────────
