@@ -1233,7 +1233,7 @@ scan_params = dict(
     n_lags_morph=int(n_lags_morph),
 )
 
-with st.spinner("Analizando el mercado... (solo la primera vez, después es mas rápido)"):
+with st.spinner("Analizando el mercado... (solo tarda mucho la primera vez, después es mas rápido)"):
     market_scan = scan_market(**scan_params)
 
 # ===================== TABS =====================
