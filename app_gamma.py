@@ -16,6 +16,8 @@ DATE_COL = "date"
 TICKER_COL = "instrument_id"
 PRICE_COL = "adj_close"
 FIXED_FREQ = "B"
+MAX_HORIZON_DAYS = 10
+DEFAULT_HORIZON_DAYS = 10
 DEFAULT_N_TEST = 50
 DEFAULT_WARM = 210
 DEFAULT_LAGS_MORPH = 5
@@ -59,20 +61,18 @@ def load_prices(path, date_col, ticker_col, price_col):
     )
 
 
-def resample_ohlcv(df, freq="D"):
+def resample_ohlcv(df, freq="B"):
+    # En esta app siempre trabajamos en días hábiles.
+    rule = "B"
     out = []
-    rule = {"D": "D", "W": "W", "B": "B", "M": "M", "Q": "Q"}[freq]
     for ticker, g in df.groupby("instrument_id", sort=True):
         g = g.sort_values("date").set_index("date")
-        if rule == "D":
-            tmp = g.copy()
-        else:
-            tmp = pd.DataFrame({
-                "adj_close": g["adj_close"].resample(rule).last(),
-                "high": g["high"].resample(rule).max(),
-                "low": g["low"].resample(rule).min(),
-                "volume": g["volume"].resample(rule).sum(),
-            })
+        tmp = pd.DataFrame({
+            "adj_close": g["adj_close"].resample(rule).last(),
+            "high": g["high"].resample(rule).max(),
+            "low": g["low"].resample(rule).min(),
+            "volume": g["volume"].resample(rule).sum(),
+        })
         tmp["instrument_id"] = ticker
         tmp = tmp.dropna(subset=["adj_close"]).reset_index()
         out.append(tmp)
@@ -477,18 +477,17 @@ def run_gamma_backtest_for_ticker(df_t, horizon, paso, n_test, precisions, roll_
 
 
 # ===================== PERFIL DE USUARIO Y PORTAFOLIO =====================
-def horizon_to_business_days(value, unit):
-    factors = {"Días hábiles": 1, "Semanas": 5, "Meses": 21}
-    return int(max(5, value * factors[unit]))
+def horizon_to_business_days(value):
+    return int(np.clip(int(value), 1, MAX_HORIZON_DAYS))
 
 
-def human_horizon_label(value, unit):
-    suffix = {"Días hábiles": "día(s) hábil(es)", "Semanas": "semana(s)", "Meses": "mes(es)"}
-    return f"{value} {suffix[unit]}"
+def human_horizon_label(value):
+    days = horizon_to_business_days(value)
+    return f"{days} día(s) hábil(es)"
 
 
 def classify_investor_profile(amount, horizon_days, risk_tolerance, goal):
-    horizon_score = 0 if horizon_days <= 15 else 1 if horizon_days <= 63 else 2
+    horizon_score = 0.0 if horizon_days <= 3 else 0.6 if horizon_days <= 7 else 1.0
     goal_score = {
         "Cuidar mi dinero": -1,
         "Balance entre crecimiento y estabilidad": 0,
@@ -764,10 +763,12 @@ def build_personalized_portfolio(scored_df, df_rs, amount, profile_info, goal, h
         cash_pct -= 0.05
     elif goal == "Buscar una oportunidad más agresiva":
         cash_pct -= 0.08
-    if horizon_days > 126:
-        cash_pct -= 0.05
-    if horizon_days <= 10:
+    if horizon_days <= 3:
+        cash_pct += 0.08
+    elif horizon_days <= 7:
         cash_pct += 0.05
+    else:
+        cash_pct += 0.03
     cash_pct = float(np.clip(cash_pct, 0.02, 0.50))
 
     n_assets = infer_asset_count(amount, profile_info["n_base"])
@@ -936,8 +937,7 @@ except Exception as e:
 def set_default_state():
     defaults = {
         "monto_inversion": 50000,
-        "horizonte_valor": 2,
-        "horizonte_unidad": "Semanas",
+        "horizonte_valor": DEFAULT_HORIZON_DAYS,
         "tolerancia_riesgo": 3,
         "objetivo_inversion": "Balance entre crecimiento y estabilidad",
     }
@@ -951,15 +951,16 @@ set_default_state()
 
 # ===================== SIDEBAR =====================
 st.sidebar.title("Tu perfil de inversión")
-st.sidebar.caption("Llena este formulario para que el panel adapte el horizonte, el perfil y la cartera sugerida.")
+st.sidebar.caption("Llena este formulario para que el panel adapte el horizonte, el perfil y la cartera sugerida. El horizonte siempre será de 1 a 10 días hábiles.")
 
 with st.sidebar.form("perfil_usuario_form"):
     monto_inversion = st.number_input("Monto a invertir", min_value=1000, value=int(st.session_state["monto_inversion"]), step=1000)
-    horizonte_valor = st.number_input("Horizonte de inversión", min_value=1, value=int(st.session_state["horizonte_valor"]), step=1)
-    horizonte_unidad = st.selectbox(
-        "Unidad del horizonte",
-        options=["Días hábiles", "Semanas", "Meses"],
-        index=["Días hábiles", "Semanas", "Meses"].index(st.session_state["horizonte_unidad"]),
+    horizonte_valor = st.slider(
+        "Horizonte de inversión (días hábiles)",
+        min_value=1,
+        max_value=MAX_HORIZON_DAYS,
+        value=int(horizon_to_business_days(st.session_state["horizonte_valor"])),
+        help="En esta versión el modelo siempre trabaja con un máximo de 10 días hábiles, es decir hasta 2 semanas de mercado.",
     )
     tolerancia_riesgo = st.slider("¿Qué tanto riesgo aceptas?", min_value=1, max_value=5, value=int(st.session_state["tolerancia_riesgo"]), help="1 = muy poco, 5 = alto")
     objetivo_inversion = st.selectbox(
@@ -982,12 +983,11 @@ with st.sidebar.form("perfil_usuario_form"):
 if profile_submit:
     st.session_state["monto_inversion"] = monto_inversion
     st.session_state["horizonte_valor"] = horizonte_valor
-    st.session_state["horizonte_unidad"] = horizonte_unidad
     st.session_state["tolerancia_riesgo"] = tolerancia_riesgo
     st.session_state["objetivo_inversion"] = objetivo_inversion
 
-selected_horizon_days = horizon_to_business_days(st.session_state["horizonte_valor"], st.session_state["horizonte_unidad"])
-selected_horizon_label = human_horizon_label(st.session_state["horizonte_valor"], st.session_state["horizonte_unidad"])
+selected_horizon_days = horizon_to_business_days(st.session_state["horizonte_valor"])
+selected_horizon_label = human_horizon_label(st.session_state["horizonte_valor"])
 profile_info = classify_investor_profile(
     amount=float(st.session_state["monto_inversion"]),
     horizon_days=selected_horizon_days,
@@ -1023,7 +1023,7 @@ with st.sidebar.expander("Ajustes avanzados del modelo"):
 df_rs = resample_ohlcv(raw, freq=FIXED_FREQ)
 wide = wide_prices(df_rs)
 tickers_all = sorted(df_rs["instrument_id"].unique().tolist())
-step_for_model = int(max(5, min(selected_horizon_days, 21)))
+step_for_model = int(max(1, min(selected_horizon_days, 5)))
 
 st.title("Panel de estrategias de inversión personalizadas")
 st.caption(
@@ -1071,25 +1071,24 @@ with tabs[0]:
             st.line_chart(tmp, width="stretch")
 
             st.markdown("### Resumen comparativo")
-            st.caption("Estos indicadores toman los últimos 3 años con datos mensuales.")
-            wide_m = wide.resample("M").last()
-            rets_m = wide_m[sel].pct_change().dropna()
-            if len(rets_m) > 36:
-                rets_m = rets_m.iloc[-36:]
+            st.caption("Estos indicadores toman los últimos 252 días hábiles para mantener coherencia con el enfoque de corto plazo.")
+            rets_b = wide[sel].sort_index().pct_change().dropna(how="all")
+            if len(rets_b) > 252:
+                rets_b = rets_b.iloc[-252:]
 
-            if rets_m.empty:
+            if rets_b.empty:
                 st.info("Aún no hay suficientes datos para comparar estas emisoras.")
             else:
-                ann = 12
+                risk_ratio = (rets_b.mean() / rets_b.std().replace(0, np.nan)) * np.sqrt(252)
                 perf = pd.DataFrame({
-                    "Cambio promedio anual": rets_m.mean() * ann * 100,
-                    "Variación anual": rets_m.std() * np.sqrt(ann) * 100,
-                    "Relación rendimiento/riesgo": rets_m.mean() / rets_m.std(),
-                }).round(2).dropna()
+                    "Cambio anualizado (%)": rets_b.mean() * 252 * 100,
+                    "Volatilidad anualizada (%)": rets_b.std() * np.sqrt(252) * 100,
+                    "Relación rendimiento/riesgo": risk_ratio,
+                }).replace([np.inf, -np.inf], np.nan).round(2).dropna(how="all")
                 st.dataframe(perf, width="stretch")
                 help_box(
-                    "Cambio promedio anual muestra el crecimiento medio estimado, variación anual refleja qué tanto se mueve la serie, "
-                    "y la relación rendimiento/riesgo ayuda a comparar qué tan eficiente fue ese desempeño."
+                    "Cambio anualizado resume el ritmo promedio de crecimiento usando días hábiles, la volatilidad anualizada refleja qué tanto se mueve la serie, "
+                    "y la relación rendimiento/riesgo ayuda a comparar qué tan eficiente fue ese comportamiento."
                 )
 
 # ---------- TAB 2 ----------
@@ -1156,7 +1155,7 @@ with tabs[1]:
 # ---------- TAB 3 ----------
 with tabs[2]:
     st.subheader("Pronóstico de una emisora")
-    st.caption(f"El modelo usa el horizonte elegido por el usuario: {selected_horizon_label}.")
+    st.caption(f"El modelo usa el horizonte elegido por el usuario: {selected_horizon_label}. En esta app el máximo siempre es de 10 días hábiles.")
 
     if not tickers_all:
         st.info("No hay emisoras suficientes para modelar.")
@@ -1266,7 +1265,7 @@ with tabs[2]:
 with tabs[3]:
     st.subheader("Comparativo entre emisoras")
     st.caption(
-        "Se ordenan según el desempeño reciente del modelo y el horizonte seleccionado por el usuario. "
+        "Se ordenan según el desempeño reciente del modelo y el horizonte seleccionado por el usuario dentro de un máximo de 10 días hábiles. "
         "Este ranking todavía es técnico; la recomendación personalizada está en la pestaña siguiente."
     )
 
