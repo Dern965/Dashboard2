@@ -1,6 +1,8 @@
 import warnings
 warnings.filterwarnings("ignore")
 
+import hashlib
+import json
 import os
 from pathlib import Path
 
@@ -46,7 +48,6 @@ def load_prices(path, date_col, ticker_col, price_col, file_mtime):
     if date_col not in df.columns:
         raise ValueError(f"No encontré la columna de fecha: {date_col}")
 
-    # OPT: formato explícito evita warning y es más rápido
     df[date_col] = pd.to_datetime(df[date_col], errors="coerce", format="%Y-%m-%d")
 
     rename_map = {date_col: "date", ticker_col: "instrument_id", price_col: "adj_close"}
@@ -81,6 +82,9 @@ def load_prices(path, date_col, ticker_col, price_col, file_mtime):
     return out
 
 
+# PARCHE 1: cachear resample_ohlcv para que scan_market siempre reciba
+# el mismo objeto hasheable y no invalide su caché innecesariamente.
+@st.cache_data
 def resample_ohlcv(df, freq="B"):
     rule = "B"
     out = []
@@ -106,9 +110,6 @@ def wide_prices(df):
 
 
 # ===================== MODELO GAMMA (OPTIMIZADO) =====================
-# OPTIMIZACIÓN 1: _encode_batch vectorizado con numpy broadcasting
-# Antes: loop Python puro → ~31 ms/llamada
-# Ahora: operaciones numpy → ~1 ms/llamada  (≈38x más rápido)
 class GammaBinary:
     def __init__(self, precision=2):
         self.precision = precision
@@ -118,18 +119,17 @@ class GammaBinary:
         self.y_train = None
         self.classes = None
         self.n_cls = None
-        self._class_masks = None   # precalculado en fit
-        self._seg_starts = None    # precalculado en fit
+        self._class_masks = None
+        self._seg_starts = None
 
     def _encode_batch(self, X):
         X = np.asarray(X, dtype=np.float64)
         scale = 10 ** self.precision
-        # Cuantizar todas las muestras de golpe
         X_int = np.clip(
             np.round(X * scale).astype(np.int32),
             0,
             self.max_int_vals,
-        )  # (n_samples, n_features)
+        )
 
         total_bits = int(np.sum(self.max_int_vals))
         result = np.zeros((len(X), total_bits), dtype=np.int8)
@@ -137,7 +137,6 @@ class GammaBinary:
         start = 0
         for j, em in enumerate(self.max_int_vals):
             em = int(em)
-            # Broadcasting: (n_samples, 1) > (em,)  →  (n_samples, em)
             col_idx = np.arange(em, dtype=np.int32)
             result[:, start : start + em] = (X_int[:, j : j + 1] > col_idx).astype(np.int8)
             start += em
@@ -156,7 +155,6 @@ class GammaBinary:
         self.rho = int(np.min(self.max_int_vals))
         self.X_enc = self._encode_batch(X)
 
-        # Precalcular máscaras de clase y posiciones de segmentos
         self._class_masks = {c: (y == c) for c in self.classes}
         starts = np.concatenate([[0], np.cumsum(self.max_int_vals)[:-1]])
         self._seg_starts = starts.astype(int)
@@ -171,7 +169,6 @@ class GammaBinary:
             winner = None
             last_scores = {c: 0.0 for c in self.classes}
 
-            # Precalcular distancias por segmento una sola vez
             seg_dists = []
             for s, em in zip(self._seg_starts, self.max_int_vals):
                 em = int(em)
@@ -183,11 +180,11 @@ class GammaBinary:
                     axis=1,
                 )
                 seg_dists.append(d)
-            seg_dists = np.stack(seg_dists, axis=0)  # (n_segments, n_train)
+            seg_dists = np.stack(seg_dists, axis=0)
 
             for theta in range(self.rho + 1):
-                ok = seg_dists <= theta           # (n_segments, n_train)
-                match_counts = ok.sum(axis=0)    # (n_train,)
+                ok = seg_dists <= theta
+                match_counts = ok.sum(axis=0)
 
                 scores = {
                     c: float(np.sum(match_counts[self._class_masks[c]]) / self.n_cls[c])
@@ -746,8 +743,7 @@ def infer_asset_count(amount, base_n):
     return base_n + 1
 
 
-# ===================== SCAN MARKET OPTIMIZADO =====================
-# OPTIMIZACIÓN 2: función auxiliar top-level para joblib
+# ===================== SCAN MARKET =====================
 def _process_one_ticker(ticker, df_rs, horizon, paso, n_test, precisions,
                         roll_acc_win, rsi_sell, rsi_buy, conf_min, warm, n_lags_morph):
     df_t = df_rs[df_rs["instrument_id"] == ticker].sort_values("date").copy()
@@ -806,25 +802,51 @@ def _process_one_ticker(ticker, df_rs, horizon, paso, n_test, precisions,
     }
 
 
-# OPTIMIZACIÓN 3: scan_market con joblib paralelo
-# n_jobs=-1  →  usa todos los cores disponibles
-# prefer="threads"  →  seguro con numpy, evita overhead de serialización
-@st.cache_data(show_spinner=False)
+# PARCHE 2: scan_market sin joblib (inestable en Streamlit Cloud) +
+# caché manual en session_state para no recalcular al cambiar de pestaña.
+# run_gamma_backtest_for_ticker ya tiene @st.cache_data, así que el cómputo
+# pesado por emisora solo ocurre una vez aunque se llame desde aquí varias veces.
+def _make_scan_key(tickers_all, horizon, paso, n_test, precisions,
+                   roll_acc_win, rsi_sell, rsi_buy, conf_min, warm, n_lags_morph):
+    payload = {
+        "tickers": sorted(tickers_all),
+        "horizon": horizon, "paso": paso, "n_test": n_test,
+        "precisions": list(precisions), "roll_acc_win": roll_acc_win,
+        "rsi_sell": rsi_sell, "rsi_buy": rsi_buy,
+        "conf_min": conf_min, "warm": warm, "n_lags_morph": n_lags_morph,
+    }
+    return hashlib.md5(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
 def scan_market(df_rs, tickers_all, horizon, paso, n_test, precisions, roll_acc_win,
                 rsi_sell, rsi_buy, conf_min, warm, n_lags_morph):
-
-    rows = Parallel(n_jobs=MAX_SCAN_JOBS, prefer="threads")(
-        delayed(_process_one_ticker)(
-            ticker, df_rs, horizon, paso, n_test, precisions,
-            roll_acc_win, rsi_sell, rsi_buy, conf_min, warm, n_lags_morph
-        )
-        for ticker in tickers_all
+    current_key = _make_scan_key(
+        tickers_all, horizon, paso, n_test, precisions,
+        roll_acc_win, rsi_sell, rsi_buy, conf_min, warm, n_lags_morph,
     )
+    # Devolver resultado cacheado si los parámetros no cambiaron
+    if (st.session_state.get("_scan_key") == current_key
+            and not st.session_state.get("_scan_result", pd.DataFrame()).empty):
+        return st.session_state["_scan_result"]
 
-    rows = [r for r in rows if r is not None]
-    if not rows:
-        return pd.DataFrame()
-    return pd.DataFrame(rows).sort_values("Puntaje modelo", ascending=False).reset_index(drop=True)
+    # Primera vez o parámetros cambiaron: recalcular con barra de progreso
+    total = len(tickers_all)
+    bar = st.progress(0, text=f"Analizando {total} emisoras…")
+    rows = []
+    for i, ticker in enumerate(tickers_all):
+        bar.progress((i + 1) / total, text=f"Analizando {ticker}… ({i+1}/{total})")
+        result = _process_one_ticker(
+            ticker, df_rs, horizon, paso, n_test, precisions,
+            roll_acc_win, rsi_sell, rsi_buy, conf_min, warm, n_lags_morph,
+        )
+        if result is not None:
+            rows.append(result)
+    bar.empty()
+
+    result_df = pd.DataFrame(rows).sort_values("Puntaje modelo", ascending=False).reset_index(drop=True) if rows else pd.DataFrame()
+    st.session_state["_scan_key"] = current_key
+    st.session_state["_scan_result"] = result_df
+    return result_df
 
 
 def score_assets_for_profile(market_df, profile_info, goal, horizon_days):
@@ -1081,6 +1103,9 @@ def help_box(text):
 # ===================== CARGA =====================
 if st.sidebar.button("Recargar archivo de datos"):
     st.cache_data.clear()
+    # Limpiar también caché manual del scan
+    st.session_state.pop("_scan_key", None)
+    st.session_state.pop("_scan_result", None)
     st.rerun()
 
 try:
@@ -1099,6 +1124,11 @@ def set_default_state():
         "horizonte_valor": DEFAULT_HORIZON_DAYS,
         "tolerancia_riesgo": 3,
         "objetivo_inversion": "Balance entre crecimiento y estabilidad",
+        # PARCHE 3: guardar la pestaña activa para que persista tras rerun
+        "main_nav": "Inicio",
+        # Caché manual del scan
+        "_scan_key": "",
+        "_scan_result": pd.DataFrame(),
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -1155,7 +1185,11 @@ if profile_submit:
     st.session_state["horizonte_valor"] = horizonte_valor
     st.session_state["tolerancia_riesgo"] = tolerancia_riesgo
     st.session_state["objetivo_inversion"] = objetivo_inversion
-    st.rerun()
+    # Si cambia el horizonte, el scan anterior ya no aplica
+    if horizonte_valor != st.session_state.get("horizonte_valor"):
+        st.session_state["_scan_key"] = ""
+    # NO hacemos st.rerun() — Streamlit re-renderiza solo al enviar el form,
+    # lo que preserva la pestaña activa sin necesidad de rerun explícito.
 
 selected_horizon_days = horizon_to_business_days(st.session_state["horizonte_valor"])
 selected_horizon_label = human_horizon_label(st.session_state["horizonte_valor"])
@@ -1199,7 +1233,7 @@ with st.sidebar.expander("Ajustes avanzados del modelo"):
 
 
 # ===================== PREPROCESO =====================
-df_rs = resample_ohlcv(raw, freq=FIXED_FREQ)
+df_rs = resample_ohlcv(raw)   # ahora cacheado: mismo objeto en todos los reruns
 wide = wide_prices(df_rs)
 tickers_all = sorted(df_rs["instrument_id"].unique().tolist())
 step_for_model = int(max(1, min(selected_horizon_days, 5)))
@@ -1219,7 +1253,9 @@ help_box(
     "🟡 ESPERAR = no hay suficiente claridad para tomar una dirección."
 )
 
-# ===================== NAVEGACIÓN Y CARGA DIFERIDA =====================
+# ===================== NAVEGACIÓN =====================
+# PARCHE 4: key="main_nav" → Streamlit guarda la selección en session_state
+# automáticamente, así sobrevive cualquier re-render sin necesidad de st.rerun().
 scan_params = dict(
     df_rs=df_rs,
     tickers_all=tuple(tickers_all),
@@ -1238,14 +1274,16 @@ scan_params = dict(
 view = st.segmented_control(
     "Sección",
     options=["Inicio", "Vista general", "Entender una emisora", "Pronóstico", "Comparativo", "Mi perfil y cartera"],
-    default="Inicio",
+    key="main_nav",
     selection_mode="single",
 )
+if view is None:
+    view = st.session_state.get("main_nav", "Inicio")
 
 market_scan = pd.DataFrame()
 needs_market_scan = view in ["Comparativo", "Mi perfil y cartera"]
 if needs_market_scan:
-    with st.spinner("Analizando el mercado... (solo tarda mucho la primera vez, después es mas rápido)"):
+    with st.spinner("Analizando el mercado… (solo tarda la primera vez, después es instantáneo)"):
         market_scan = scan_market(**scan_params)
 
 # ---------- TAB 0: INICIO ----------
