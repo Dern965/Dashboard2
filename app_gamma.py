@@ -1287,6 +1287,266 @@ def help_box(text):
     st.info(text)
 
 
+PROFILE_UI_STYLES = {
+    "Conservador": {"emoji": "🟢", "color": "#0F766E", "bg": "#ECFDF5", "label": "Tranquilidad / protección"},
+    "Moderado": {"emoji": "🟡", "color": "#B45309", "bg": "#FFFBEB", "label": "Equilibrio / advertencia media"},
+    "Agresivo": {"emoji": "🔴", "color": "#B91C1C", "bg": "#FEF2F2", "label": "Mayor riesgo / mayor variación"},
+}
+
+
+def profile_badge_html(profile):
+    style = PROFILE_UI_STYLES.get(profile, PROFILE_UI_STYLES["Moderado"])
+    return f"""
+    <div style="background:{style['bg']}; border-left:7px solid {style['color']};
+                padding:14px 16px; border-radius:14px; margin:8px 0 12px 0;">
+        <div style="font-size:18px; font-weight:700; color:{style['color']};">
+            {style['emoji']} Perfil {profile}
+        </div>
+        <div style="font-size:14px; color:#374151; margin-top:4px;">
+            {style['label']}
+        </div>
+    </div>
+    """
+
+
+def build_goal_reference_table(horizon_days):
+    inflation_target = ((1 + INFLATION_REFERENCE_ANNUAL) ** (horizon_days / 252) - 1) * 100
+    return pd.DataFrame([
+        {
+            "Objetivo": "Cuidar mi dinero",
+            "Color sugerido": "Verde / azul",
+            "Criterio operativo": "Priorizar baja volatilidad, reserva mayor y evitar señales negativas.",
+            "Rendimiento mínimo deseable": f"Cercano o superior a {inflation_target:.3f}% para conservar poder adquisitivo en el periodo.",
+        },
+        {
+            "Objetivo": "Balance entre crecimiento y estabilidad",
+            "Color sugerido": "Amarillo",
+            "Criterio operativo": "Combinar rendimiento esperado, confianza del modelo y control de volatilidad.",
+            "Rendimiento mínimo deseable": "Mayor que el escenario de solo conservar valor, con riesgo medio.",
+        },
+        {
+            "Objetivo": "Hacer crecer mi inversión",
+            "Color sugerido": "Naranja",
+            "Criterio operativo": "Dar más peso al rendimiento esperado, aceptando variación moderada-alta.",
+            "Rendimiento mínimo deseable": "Rendimiento positivo superior al de opciones conservadoras.",
+        },
+        {
+            "Objetivo": "Buscar una oportunidad más agresiva",
+            "Color sugerido": "Rojo",
+            "Criterio operativo": "Priorizar oportunidad de ganancia, aun con volatilidad alta y posibilidad de pérdida.",
+            "Rendimiento mínimo deseable": "Alto rendimiento esperado, aceptando mayor incertidumbre.",
+        },
+    ])
+
+
+def assess_profile_consistency(amount, risk_tolerance, goal, horizon_days, profile_info):
+    """Genera mensajes para explicar si las entradas del usuario son coherentes entre sí."""
+    amount = float(amount)
+    risk_tolerance = int(risk_tolerance)
+    horizon_days = int(horizon_days)
+    rows = []
+
+    def add(level, topic, message):
+        icon = {"OK": "✅", "Atención": "⚠️", "Nota": "ℹ️"}.get(level, "ℹ️")
+        rows.append({"Estado": f"{icon} {level}", "Aspecto": topic, "Lectura": message})
+
+    add("OK", "Perfil", f"Con las respuestas actuales, el sistema clasifica al usuario como {profile_info['perfil'].lower()}.")
+
+    if amount < 20_000 and risk_tolerance >= 4:
+        add("Atención", "Monto vs riesgo", "El monto es bajo y el riesgo seleccionado es alto. Para evitar fragmentar demasiado la inversión, la cartera puede quedar concentrada en pocas emisoras.")
+    elif amount >= 500_000 and profile_info["perfil"] == "Conservador":
+        add("Nota", "Monto alto conservador", "El monto permite diversificar más, pero el perfil conservador mantiene una reserva elevada y prefiere emisoras menos volátiles.")
+    else:
+        add("OK", "Monto", "El monto seleccionado es compatible con la lógica de diversificación del sistema.")
+
+    if horizon_days <= 3 and risk_tolerance >= 4:
+        add("Atención", "Horizonte vs riesgo", "Un horizonte muy corto con riesgo alto puede generar resultados más variables. El sistema mostrará niveles de salida y alerta para acotar la decisión.")
+    elif horizon_days <= 3:
+        add("Nota", "Horizonte corto", "El horizonte es de muy corto plazo; cualquier noticia puede alterar el comportamiento del precio.")
+    else:
+        add("OK", "Horizonte", "El horizonte elegido se mantiene dentro del alcance de corto plazo del modelo GAMMA.")
+
+    if goal == "Cuidar mi dinero" and risk_tolerance >= 4:
+        add("Atención", "Objetivo vs riesgo", "El objetivo de cuidar el dinero no coincide del todo con una tolerancia de riesgo alta. El sistema compensará aumentando criterios de protección.")
+    elif goal == "Buscar una oportunidad más agresiva" and risk_tolerance <= 2:
+        add("Atención", "Objetivo vs riesgo", "El objetivo agresivo contrasta con una tolerancia baja al riesgo. La recomendación puede quedar limitada por los filtros de seguridad.")
+    else:
+        add("OK", "Objetivo", "El objetivo seleccionado es coherente con la tolerancia al riesgo capturada.")
+
+    return pd.DataFrame(rows)
+
+
+def compute_strategy_levels(row, horizon_days):
+    current = float(row.get("Precio actual", np.nan))
+    target = float(row.get("Precio estimado", np.nan))
+    expected = float(row.get("Cambio esperado (%)", np.nan))
+    signal = str(row.get("Señal", "ESPERAR"))
+    vol20 = row.get("Volatilidad 20d (%)", np.nan)
+
+    if not np.isfinite(current) or current <= 0:
+        return pd.Series({
+            "Precio actual": np.nan,
+            "Precio objetivo estimado": np.nan,
+            "Rendimiento esperado (%)": np.nan,
+            "Nivel sugerido de salida": np.nan,
+            "Nivel de alerta": np.nan,
+            "Acción sugerida": "Sin datos suficientes",
+            "Lectura estratégica": "No se pudo calcular una estrategia por falta de precio actual.",
+        })
+
+    if not np.isfinite(target):
+        target = current * (1 + (expected if np.isfinite(expected) else 0) / 100)
+
+    if np.isfinite(vol20):
+        horizon_vol_pct = (float(vol20) / np.sqrt(252)) * np.sqrt(max(horizon_days, 1))
+        alert_pct = float(np.clip(horizon_vol_pct * 0.60, 1.0, 8.0)) / 100
+    else:
+        alert_pct = 0.03
+
+    alert_level = current * (1 - alert_pct)
+
+    if signal == "SUBE" and target > current:
+        action = "Considerar entrada"
+        exit_level = target
+        lectura = "La señal es positiva. Si el precio alcanza el objetivo antes del horizonte, se puede considerar tomar ganancia; si cae al nivel de alerta, conviene revisar la posición."
+    elif signal == "ESPERAR":
+        action = "Esperar confirmación"
+        exit_level = np.nan
+        lectura = "La señal no es suficientemente clara. El nivel de alerta sirve como referencia de riesgo, pero la acción principal es esperar más información."
+    else:
+        action = "No comprar / evitar"
+        exit_level = np.nan
+        lectura = "La señal no favorece una entrada de compra. El sistema evita esta emisora salvo que no existan alternativas elegibles."
+
+    return pd.Series({
+        "Precio actual": round(current, 2),
+        "Precio objetivo estimado": round(target, 2),
+        "Rendimiento esperado (%)": round((target / current - 1) * 100, 2),
+        "Nivel sugerido de salida": round(exit_level, 2) if np.isfinite(exit_level) else np.nan,
+        "Nivel de alerta": round(alert_level, 2),
+        "Acción sugerida": action,
+        "Lectura estratégica": lectura,
+    })
+
+
+def build_strategy_table_for_assets(scored_assets, selected_assets, horizon_days):
+    if scored_assets.empty or not selected_assets:
+        return pd.DataFrame()
+    base = scored_assets[scored_assets["Emisora"].isin(selected_assets)].copy()
+    if base.empty:
+        return pd.DataFrame()
+    levels = base.apply(lambda r: compute_strategy_levels(r, horizon_days), axis=1)
+    out = pd.concat([base[["Emisora", "Señal", "Confianza", "Riesgo"]].reset_index(drop=True), levels.reset_index(drop=True)], axis=1)
+    return out
+
+
+def build_idle_money_comparison(amount, portfolio_summary, horizon_days):
+    amount = float(amount)
+    expected_pct = float(portfolio_summary.get("portfolio_expected_ret", 0.0) or 0.0)
+    inflation_pct = ((1 + INFLATION_REFERENCE_ANNUAL) ** (horizon_days / 252) - 1) * 100
+
+    nominal_without_investment = amount
+    real_without_investment = amount / (1 + inflation_pct / 100)
+    expected_with_portfolio = amount * (1 + expected_pct / 100)
+    real_with_portfolio = expected_with_portfolio / (1 + inflation_pct / 100)
+
+    return pd.DataFrame([
+        {
+            "Escenario": "No invertir / dejar el dinero quieto",
+            "Monto nominal al final": nominal_without_investment,
+            "Rendimiento nominal estimado (%)": 0.0,
+            "Referencia de inflación del periodo (%)": inflation_pct,
+            "Valor real aproximado": real_without_investment,
+            "Lectura": "El número de pesos no cambia, pero el poder adquisitivo puede disminuir por inflación.",
+        },
+        {
+            "Escenario": "Seguir cartera sugerida",
+            "Monto nominal al final": expected_with_portfolio,
+            "Rendimiento nominal estimado (%)": expected_pct,
+            "Referencia de inflación del periodo (%)": inflation_pct,
+            "Valor real aproximado": real_with_portfolio,
+            "Lectura": "El rendimiento esperado se compara contra la pérdida de poder adquisitivo del periodo.",
+        },
+    ]).round({
+        "Monto nominal al final": 2,
+        "Rendimiento nominal estimado (%)": 3,
+        "Referencia de inflación del periodo (%)": 3,
+        "Valor real aproximado": 2,
+    })
+
+
+def build_historical_portfolio_simulation(portfolio_df, df_rs, amount, horizon_days, paso, n_test,
+                                          precisions, roll_acc_win, rsi_sell, rsi_buy,
+                                          conf_min, warm, n_lags_morph):
+    """
+    Simulación retrospectiva aproximada.
+    Usa las emisoras seleccionadas en la cartera actual y evalúa cómo se habrían comportado
+    sus señales históricas walk-forward. No reconstruye la cartera desde cero en cada fecha.
+    """
+    if portfolio_df.empty:
+        return pd.DataFrame(), {}
+
+    assets = portfolio_df[portfolio_df["Emisora"] != "Efectivo / reserva"].copy()
+    assets = assets[assets["Peso (%)"].fillna(0) > 0]
+    if assets.empty:
+        return pd.DataFrame(), {}
+
+    pieces = []
+    for _, asset in assets.iterrows():
+        ticker = asset["Emisora"]
+        weight = float(asset["Peso (%)"]) / 100.0
+        df_t = df_rs[df_rs["instrument_id"] == ticker].sort_values("date").copy()
+        res = run_gamma_backtest_for_ticker(
+            df_t=df_t,
+            horizon=horizon_days,
+            paso=paso,
+            n_test=int(n_test),
+            precisions=tuple(int(x) for x in precisions),
+            roll_acc_win=int(roll_acc_win),
+            rsi_sell=float(rsi_sell),
+            rsi_buy=float(rsi_buy),
+            conf_min=float(conf_min),
+            warm=int(warm),
+            n_lags_morph=int(n_lags_morph),
+        )
+        if res is None:
+            continue
+
+        real_ret = np.asarray(res["ret_real"], dtype=float)
+        pred = np.asarray(res["pred_F"], dtype=int)
+        model_ret = np.where(pred == 1, real_ret, 0.0)
+        tmp = pd.DataFrame({
+            "Fecha": pd.to_datetime(res["dates"]),
+            "Rendimiento modelo ponderado (%)": model_ret * weight,
+            "Rendimiento compra y mantén ponderado (%)": real_ret * weight,
+        })
+        pieces.append(tmp)
+
+    if not pieces:
+        return pd.DataFrame(), {}
+
+    hist = pd.concat(pieces, ignore_index=True)
+    hist = hist.groupby("Fecha", as_index=False)[[
+        "Rendimiento modelo ponderado (%)",
+        "Rendimiento compra y mantén ponderado (%)",
+    ]].sum().sort_values("Fecha")
+
+    hist["Capital modelo"] = amount * np.cumprod(1 + hist["Rendimiento modelo ponderado (%)"] / 100)
+    hist["Capital compra y mantén"] = amount * np.cumprod(1 + hist["Rendimiento compra y mantén ponderado (%)"] / 100)
+    hist["Resultado del periodo"] = np.where(hist["Rendimiento modelo ponderado (%)"] >= 0, "Positivo", "Negativo")
+
+    summary = {
+        "periods": int(len(hist)),
+        "initial_amount": float(amount),
+        "final_model": float(hist["Capital modelo"].iloc[-1]),
+        "final_buyhold": float(hist["Capital compra y mantén"].iloc[-1]),
+        "return_model_pct": float((hist["Capital modelo"].iloc[-1] / amount - 1) * 100),
+        "return_buyhold_pct": float((hist["Capital compra y mantén"].iloc[-1] / amount - 1) * 100),
+        "positive_periods_pct": float((hist["Rendimiento modelo ponderado (%)"] >= 0).mean() * 100),
+    }
+    return hist, summary
+
+
 # ===================== CARGA =====================
 if st.sidebar.button("Recargar archivo de datos"):
     st.cache_data.clear()
@@ -1622,6 +1882,43 @@ if view == "Inicio":
         )
 
     st.markdown("---")
+
+
+    with st.expander("Alcance del sistema: corto plazo y Bolsa Mexicana de Valores"):
+        st.markdown(
+            "El sistema se limita a **emisoras de la Bolsa Mexicana de Valores** para mantener consistencia "
+            "en moneda, disponibilidad de datos y alcance académico. El modelo GAMMA trabaja con datos diarios "
+            "y un horizonte máximo de **10 días hábiles**, por lo que se interpreta como una herramienta de "
+            "apoyo para análisis de corto plazo.\n\n"
+            "Los horizontes de mediano y largo plazo requerirían integrar más información, como variables "
+            "macroeconómicas, ciclos económicos, inflación, tipo de cambio, eventos de crisis y datos históricos "
+            "más amplios. Por eso se documentan como líneas futuras y no como parte central de esta versión."
+        )
+
+    with st.expander("Cómo se combinan GAMMA, perfil y cartera"):
+        st.markdown(
+            "El sistema tiene tres capas separadas:\n\n"
+            "1. **Datos históricos → Modelo GAMMA → Señales de emisoras**. GAMMA analiza patrones de precios y genera señales como SUBE, BAJA o ESPERAR.\n"
+            "2. **Usuario → Perfil inversionista**. El perfil no lo decide GAMMA; se calcula con monto, horizonte, tolerancia al riesgo y objetivo.\n"
+            "3. **Perfil + señales → Cartera sugerida**. La distribución final combina la señal del modelo con la compatibilidad de cada emisora con el perfil del usuario."
+        )
+
+    with st.expander("Definición operativa de los objetivos"):
+        st.dataframe(build_goal_reference_table(selected_horizon_days), width="stretch")
+        st.caption(
+            "La referencia de inflación es educativa y sirve para explicar que 'cuidar mi dinero' no significa "
+            "solo mantener el mismo número de pesos, sino conservar poder adquisitivo."
+        )
+
+    with st.expander("Líneas futuras del proyecto"):
+        st.markdown(
+            "- Incorporar horizontes de mediano plazo con variables macroeconómicas.\n"
+            "- Comparar contra instrumentos conservadores como CETES u otros referentes.\n"
+            "- Agregar rebalanceo periódico de cartera.\n"
+            "- Evaluar escenarios de crisis económica y recuperación.\n"
+            "- Integrar simuladores bursátiles externos para pruebas prácticas.\n"
+            "- Añadir inflación, tipo de cambio y noticias como variables complementarias."
+        )
 
     st.error(
         "**⚠️ Aviso importante — Herramienta de apoyo, no de asesoría financiera**\n\n"
@@ -1993,6 +2290,7 @@ elif view == "Mi perfil y cartera":
             st.metric("Monto analizado", fmt_num(float(st.session_state["monto_inversion"]), 0))
             st.metric("Horizonte usado", f"{selected_horizon_days} días hábiles")
             st.info(profile_info["descripcion"])
+            st.markdown(profile_badge_html(profile_info["perfil"]), unsafe_allow_html=True)
 
         with c2:
             st.markdown("### 2) Resumen de la propuesta")
@@ -2007,7 +2305,21 @@ elif view == "Mi perfil y cartera":
                 f"pasaron filtros {portfolio_pack['summary'].get('eligible_assets', 0)}."
             )
 
-        st.markdown("### 3) Distribución sugerida del dinero")
+        st.markdown("### 3) Validación de coherencia del perfil")
+        consistency_df = assess_profile_consistency(
+            amount=float(st.session_state["monto_inversion"]),
+            risk_tolerance=int(st.session_state["tolerancia_riesgo"]),
+            goal=st.session_state["objetivo_inversion"],
+            horizon_days=selected_horizon_days,
+            profile_info=profile_info,
+        )
+        st.dataframe(consistency_df, width="stretch")
+        help_box(
+            "Esta tabla ayuda a defender por qué el sistema recomienda más o menos emisoras según la coherencia "
+            "entre monto, horizonte, riesgo y objetivo."
+        )
+
+        st.markdown("### 4) Distribución sugerida del dinero")
         portfolio_df = portfolio_pack["portfolio"].copy()
         st.dataframe(portfolio_df, width="stretch")
         help_box(
@@ -2020,7 +2332,7 @@ elif view == "Mi perfil y cartera":
         fig_pie = px.pie(pie_df, names="Emisora", values="Peso (%)", title="Cómo repartir el dinero según tu perfil")
         st.plotly_chart(fig_pie, width="stretch")
 
-        st.markdown("### 4) Por qué se eligieron estas emisoras")
+        st.markdown("### 5) Por qué se eligieron estas emisoras")
         explain_cols = [
             "Emisora", "Señal", "Confianza", "Riesgo",
             "Cambio esperado (%)", "Volatilidad 60d (%)", "Puntaje perfil"
@@ -2031,14 +2343,14 @@ elif view == "Mi perfil y cartera":
             "el cambio esperado y tu objetivo personal."
         )
 
-        st.markdown("### 5) Validación orientada al usuario")
+        st.markdown("### 6) Validación orientada al usuario")
         st.dataframe(portfolio_pack["validation"], width="stretch")
         help_box(
             "Esta validación no solo revisa si el modelo predice bien, también verifica si la cartera "
             "respeta el tipo de usuario que dijiste ser."
         )
 
-        st.markdown("### 6) Interpretación sencilla")
+        st.markdown("### 7) Interpretación sencilla")
         interp = [
             f"Tu perfil se clasificó como {profile_info['perfil'].lower()}.",
             f"Tu objetivo fue: {st.session_state['objetivo_inversion'].lower()}.",
@@ -2060,3 +2372,79 @@ elif view == "Mi perfil y cartera":
                     "así que conviene revisar la propuesta o aumentar la reserva."
                 )
         st.write(" ".join(interp))
+
+        selected_assets = portfolio_df.loc[portfolio_df["Emisora"] != "Efectivo / reserva", "Emisora"].tolist()
+
+        st.markdown("### 8) Estrategia de salida y alerta")
+        strategy_df = build_strategy_table_for_assets(scored_assets, selected_assets, selected_horizon_days)
+        if strategy_df.empty:
+            st.info("No hay emisoras seleccionadas para construir niveles de salida y alerta.")
+        else:
+            st.dataframe(strategy_df, width="stretch")
+            help_box(
+                "Esta sección convierte el resultado 'sube/baja' en una estrategia más clara: precio de partida, "
+                "precio objetivo, rendimiento esperado, nivel sugerido de salida y nivel de alerta."
+            )
+
+        st.markdown("### 9) ¿Qué pasa si no invierto?")
+        idle_df = build_idle_money_comparison(
+            amount=float(st.session_state["monto_inversion"]),
+            portfolio_summary=portfolio_pack["summary"],
+            horizon_days=selected_horizon_days,
+        )
+        st.dataframe(idle_df, width="stretch")
+        help_box(
+            "La comparación usa una referencia educativa de inflación anual para mostrar que cuidar el dinero "
+            "también implica pensar en poder adquisitivo, no solo en que el número de pesos no cambie."
+        )
+
+        st.markdown("### 10) Simulación histórica aproximada")
+        sim_df, sim_summary = build_historical_portfolio_simulation(
+            portfolio_df=portfolio_df,
+            df_rs=df_rs,
+            amount=float(st.session_state["monto_inversion"]),
+            horizon_days=selected_horizon_days,
+            paso=step_for_model,
+            n_test=int(n_test),
+            precisions=(int(pA), int(pB), int(pC)),
+            roll_acc_win=int(roll_acc_win),
+            rsi_sell=float(rsi_sell),
+            rsi_buy=float(rsi_buy),
+            conf_min=float(conf_min),
+            warm=int(warm),
+            n_lags_morph=int(n_lags_morph),
+        )
+        if sim_df.empty:
+            st.info("No fue posible construir la simulación histórica con las emisoras seleccionadas.")
+        else:
+            h1, h2, h3, h4 = st.columns(4)
+            h1.metric("Periodos simulados", sim_summary["periods"])
+            h2.metric("Capital final modelo", fmt_num(sim_summary["final_model"], 2))
+            h3.metric("Rendimiento modelo", fmt_pct(sim_summary["return_model_pct"], 2))
+            h4.metric("Periodos positivos", fmt_pct(sim_summary["positive_periods_pct"], 1))
+
+            fig_sim = go.Figure()
+            fig_sim.add_trace(go.Scatter(
+                x=sim_df["Fecha"],
+                y=sim_df["Capital modelo"],
+                mode="lines",
+                name="Estrategia GAMMA long-only",
+            ))
+            fig_sim.add_trace(go.Scatter(
+                x=sim_df["Fecha"],
+                y=sim_df["Capital compra y mantén"],
+                mode="lines",
+                name="Compra y mantén ponderada",
+            ))
+            fig_sim.update_layout(
+                title="Simulación histórica con las emisoras seleccionadas",
+                xaxis_title="Fecha",
+                yaxis_title="Capital simulado",
+            )
+            st.plotly_chart(fig_sim, width="stretch")
+            st.dataframe(sim_df.tail(15).round(3), width="stretch")
+            help_box(
+                "Esta simulación usa señales históricas walk-forward del modelo sobre las emisoras seleccionadas. "
+                "No garantiza resultados futuros y no reconstruye una cartera nueva en cada fecha; sirve como prueba funcional "
+                "para evitar que la recomendación quede solo como una propuesta sin validación."
+            )
