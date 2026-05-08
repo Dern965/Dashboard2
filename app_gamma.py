@@ -31,6 +31,53 @@ DEFAULT_WARM = 210
 DEFAULT_LAGS_MORPH = 5
 DEFAULT_CONF_MIN = 0.04
 
+MIN_INVESTMENT_AMOUNT = 1000
+MAX_INVESTMENT_AMOUNT = 1_000_000
+DEFAULT_INVESTMENT_AMOUNT = 50_000
+
+# Referencia educativa para explicar "cuidar mi dinero".
+# No se usa como dato oficial de inflación, solo como meta mínima conceptual.
+INFLATION_REFERENCE_ANNUAL = 0.045
+
+INVESTMENT_GOALS = [
+    "Cuidar mi dinero",
+    "Balance entre crecimiento y estabilidad",
+    "Hacer crecer mi inversión",
+    "Buscar una oportunidad más agresiva",
+]
+
+GOAL_EMOJI = {
+    "Cuidar mi dinero": "🛡️",
+    "Balance entre crecimiento y estabilidad": "⚖️",
+    "Hacer crecer mi inversión": "📈",
+    "Buscar una oportunidad más agresiva": "🔥",
+}
+
+GOAL_DESCRIPTIONS = {
+    "Cuidar mi dinero": (
+        "Prioriza conservar el poder adquisitivo. En este contexto no significa guardar el dinero sin moverlo, "
+        "sino buscar una alternativa de bajo riesgo que aspire, al menos, a compensar la pérdida de valor por inflación."
+    ),
+    "Balance entre crecimiento y estabilidad": (
+        "Busca un punto medio: aceptar movimientos moderados para intentar crecer, pero sin concentrar demasiado riesgo."
+    ),
+    "Hacer crecer mi inversión": (
+        "Da más peso al rendimiento esperado. Acepta más variación en el precio con tal de buscar una mayor ganancia."
+    ),
+    "Buscar una oportunidad más agresiva": (
+        "Acepta alta volatilidad y mayor posibilidad de pérdida temporal para perseguir oportunidades con mayor potencial."
+    ),
+}
+
+RISK_LEVEL_DESCRIPTIONS = {
+    1: "Muy bajo: prefieres evitar pérdidas aunque el crecimiento sea limitado.",
+    2: "Bajo: aceptas pequeñas variaciones si la propuesta sigue siendo estable.",
+    3: "Medio: buscas equilibrio entre riesgo y rendimiento.",
+    4: "Alto: toleras caídas temporales si existe potencial de crecimiento.",
+    5: "Muy alto: aceptas movimientos fuertes y mayor incertidumbre.",
+}
+
+
 SEASONAL_PRIOR = {
     1: 0.0, 2: 0.0, 3: +0.10, 4: +0.20, 5: -0.10, 6: 0.0,
     7: 0.0, 8: -0.15, 9: -0.10, 10: -0.10, 11: +0.10, 12: 0.0,
@@ -596,39 +643,80 @@ def human_horizon_label(value):
 
 
 def classify_investor_profile(amount, horizon_days, risk_tolerance, goal):
+    """
+    Clasifica al usuario con base en cuatro factores:
+    monto, horizonte, tolerancia al riesgo y objetivo.
+    La idea es que el perfil no dependa solo del modelo GAMMA,
+    sino de las preferencias declaradas por el usuario.
+    """
+    amount = float(np.clip(amount, MIN_INVESTMENT_AMOUNT, MAX_INVESTMENT_AMOUNT))
+    horizon_days = int(horizon_to_business_days(horizon_days))
+    risk_tolerance = int(np.clip(risk_tolerance, 1, 5))
+
     horizon_score = 0.0 if horizon_days <= 3 else 0.6 if horizon_days <= 7 else 1.0
     goal_score = {
-        "Cuidar mi dinero": -1,
-        "Balance entre crecimiento y estabilidad": 0,
-        "Hacer crecer mi inversión": 1,
-        "Buscar una oportunidad más agresiva": 2,
+        "Cuidar mi dinero": -1.0,
+        "Balance entre crecimiento y estabilidad": 0.0,
+        "Hacer crecer mi inversión": 1.0,
+        "Buscar una oportunidad más agresiva": 2.0,
     }[goal]
-    total = (risk_tolerance - 1) * 1.6 + horizon_score + goal_score
+
+    # El monto no define si alguien es agresivo, pero sí cambia la diversificación.
+    amount_score = 0.0
+    if amount >= 150_000:
+        amount_score = 0.3
+    if amount >= 500_000:
+        amount_score = 0.5
+
+    total = (risk_tolerance - 1) * 1.6 + horizon_score + goal_score + amount_score
 
     if total <= 2.5:
         profile = "Conservador"
-        description = "Priorizas estabilidad, menor exposición y más protección del capital."
+        description = (
+            "Perfil conservador: se prioriza estabilidad, menor volatilidad y una reserva mayor. "
+            "La cartera evita señales negativas y limita la concentración."
+        )
     elif total <= 5.5:
         profile = "Moderado"
-        description = "Buscas crecer sin dejar de cuidar el riesgo."
+        description = (
+            "Perfil moderado: se busca equilibrio entre crecimiento y control del riesgo. "
+            "La cartera puede incluir más emisoras si el monto lo permite."
+        )
     else:
         profile = "Agresivo"
-        description = "Aceptas movimientos fuertes con tal de buscar mayor crecimiento."
+        description = (
+            "Perfil agresivo: se acepta mayor variación en el precio para buscar más rendimiento. "
+            "La cartera reduce la reserva y puede diversificar en más emisoras."
+        )
 
-    amount_note = ""
-    if amount < 20000:
-        amount_note = " Como el monto es relativamente pequeño, conviene evitar repartirlo en demasiadas emisoras."
-    elif amount > 150000:
-        amount_note = " Como el monto es más alto, sí tiene sentido diversificar un poco más."
+    if amount < 20_000:
+        amount_note = " Monto bajo: conviene no fragmentar demasiado la inversión."
+        amount_band = "Bajo"
+    elif amount < 150_000:
+        amount_note = " Monto medio: permite diversificación moderada."
+        amount_band = "Medio"
+    elif amount < 500_000:
+        amount_note = " Monto alto: permite diversificar más sin perder claridad."
+        amount_band = "Alto"
+    else:
+        amount_note = " Monto muy alto: se recomienda una cartera más diversificada, sin rebasar el límite del simulador."
+        amount_band = "Muy alto"
+
+    inflation_target_horizon = ((1 + INFLATION_REFERENCE_ANNUAL) ** (horizon_days / 252) - 1) * 100
 
     return {
         "perfil": profile,
         "puntaje": round(float(total), 2),
         "descripcion": description + amount_note,
         "horizonte_dias": int(horizon_days),
+        "objetivo_detalle": GOAL_DESCRIPTIONS[goal],
+        "objetivo_icono": GOAL_EMOJI[goal],
+        "riesgo_detalle": RISK_LEVEL_DESCRIPTIONS[risk_tolerance],
+        "monto_categoria": amount_band,
+        "meta_minima_horizonte": float(inflation_target_horizon),
         "umbral_volatilidad": {"Conservador": 24, "Moderado": 34, "Agresivo": 50}[profile],
         "cash_base": {"Conservador": 0.30, "Moderado": 0.15, "Agresivo": 0.05}[profile],
-        "max_peso": {"Conservador": 0.30, "Moderado": 0.40, "Agresivo": 0.50}[profile],
+        "max_peso": {"Conservador": 0.28, "Moderado": 0.35, "Agresivo": 0.45}[profile],
         "n_base": {"Conservador": 2, "Moderado": 3, "Agresivo": 4}[profile],
     }
 
@@ -736,11 +824,24 @@ def normalize_weights_with_cap(score_series, total_weight, cap):
 
 
 def infer_asset_count(amount, base_n):
-    if amount < 20000:
+    """
+    Define cuántas emisoras sugerir según el monto.
+    Esta era la razón principal por la que siempre salían 3 a 5 recomendaciones:
+    antes la función solo permitía base_n o base_n + 1.
+    """
+    amount = float(amount)
+
+    if amount < 5_000:
+        return 1
+    if amount < 20_000:
         return min(2, base_n)
-    if amount < 60000:
+    if amount < 60_000:
         return max(2, base_n)
-    return base_n + 1
+    if amount < 150_000:
+        return max(3, base_n + 1)
+    if amount < 500_000:
+        return max(4, base_n + 2)
+    return max(5, base_n + 3)
 
 
 # ===================== SCAN MARKET =====================
@@ -892,6 +993,37 @@ def score_assets_for_profile(market_df, profile_info, goal, horizon_days):
     return df.sort_values(["Elegible", "Puntaje perfil"], ascending=[False, False]).reset_index(drop=True)
 
 
+def explain_asset_choice(row, profile, goal):
+    signal = str(row.get("Señal", ""))
+    risk = str(row.get("Riesgo", "Sin datos"))
+    expected = row.get("Cambio esperado (%)", np.nan)
+    vol = row.get("Volatilidad 60d (%)", np.nan)
+    conf = row.get("Confianza", "Sin datos")
+
+    parts = []
+    if signal == "SUBE":
+        parts.append("señal positiva")
+    elif signal == "ESPERAR":
+        parts.append("señal prudente")
+    else:
+        parts.append("no es la primera opción por señal negativa")
+
+    if pd.notna(expected):
+        parts.append(f"cambio esperado de {expected:.2f}%")
+    if pd.notna(vol):
+        parts.append(f"volatilidad reciente de {vol:.2f}%")
+    parts.append(f"confianza {str(conf).lower()}")
+
+    if profile == "Conservador":
+        criterio = "se priorizó menor volatilidad y mayor protección"
+    elif profile == "Moderado":
+        criterio = "se buscó equilibrio entre rendimiento, confianza y riesgo"
+    else:
+        criterio = "se dio más peso al rendimiento esperado y a la oportunidad"
+
+    return f"Para perfil {profile.lower()}, {criterio}; {', '.join(parts)}."
+
+
 def build_personalized_portfolio(scored_df, df_rs, amount, profile_info, goal, horizon_days):
     if scored_df.empty:
         return {
@@ -904,10 +1036,14 @@ def build_personalized_portfolio(scored_df, df_rs, amount, profile_info, goal, h
                 "portfolio_conf": 0.0,
                 "selected_count": 0,
                 "profile": profile_info["perfil"],
+                "target_assets": 0,
+                "eligible_assets": 0,
             },
         }
 
+    amount = float(np.clip(amount, MIN_INVESTMENT_AMOUNT, MAX_INVESTMENT_AMOUNT))
     profile = profile_info["perfil"]
+
     cash_pct = profile_info["cash_base"]
     if goal == "Cuidar mi dinero":
         cash_pct += 0.10
@@ -915,35 +1051,49 @@ def build_personalized_portfolio(scored_df, df_rs, amount, profile_info, goal, h
         cash_pct -= 0.05
     elif goal == "Buscar una oportunidad más agresiva":
         cash_pct -= 0.08
+
     if horizon_days <= 3:
         cash_pct += 0.08
     elif horizon_days <= 7:
         cash_pct += 0.05
     else:
         cash_pct += 0.03
-    cash_pct = float(np.clip(cash_pct, 0.02, 0.50))
 
-    n_assets = infer_asset_count(amount, profile_info["n_base"])
-    cap_weight = profile_info["max_peso"] * (1 - cash_pct)
+    cash_pct = float(np.clip(cash_pct, 0.02, 0.50))
+    invest_pct = 1 - cash_pct
+
+    target_assets = infer_asset_count(amount, profile_info["n_base"])
+    cap_weight = profile_info["max_peso"] * invest_pct
 
     eligible = scored_df[scored_df["Elegible"]].copy()
+    eligible_assets = len(eligible)
+
     if eligible.empty:
         top = scored_df.head(1).copy()
         eligible = top.assign(Elegible=False)
         cash_pct = 1.0
         invest_pct = 0.0
     else:
-        invest_pct = 1 - cash_pct
-        eligible = eligible.head(n_assets).copy()
+        # El monto ahora sí modifica el número de recomendaciones.
+        # Aun así, nunca se inventan emisoras: solo se toman las que pasan filtros de elegibilidad.
+        eligible = eligible.head(min(target_assets, eligible_assets)).copy()
 
     if invest_pct > 0:
-        weights = normalize_weights_with_cap(eligible["Puntaje perfil"], total_weight=invest_pct, cap=cap_weight)
+        weights = normalize_weights_with_cap(
+            eligible["Puntaje perfil"],
+            total_weight=invest_pct,
+            cap=cap_weight,
+        )
         eligible["Peso"] = weights.values
     else:
         eligible["Peso"] = 0.0
 
     eligible["Monto sugerido"] = eligible["Peso"] * amount
     eligible["Señal visual"] = eligible["Señal"].map(signal_emoji) + " " + eligible["Señal"]
+    eligible["Motivo de elección"] = eligible.apply(
+        lambda r: explain_asset_choice(r, profile=profile, goal=goal),
+        axis=1,
+    )
 
     cash_row = pd.DataFrame([{
         "Emisora": "Efectivo / reserva",
@@ -957,13 +1107,17 @@ def build_personalized_portfolio(scored_df, df_rs, amount, profile_info, goal, h
         "Cambio esperado (%)": 0.0,
         "Volatilidad 60d (%)": 0.0,
         "Riesgo": "Bajo",
+        "Motivo de elección": (
+            "Reserva sugerida para reducir exposición. Sirve para no invertir el 100% del capital "
+            "cuando el horizonte es corto o el perfil requiere más protección."
+        ),
     }])
 
     portfolio = pd.concat([eligible, cash_row], ignore_index=True, sort=False)
     portfolio["Peso (%)"] = portfolio["Peso"] * 100
     portfolio = portfolio[[
         "Emisora", "Señal visual", "Confianza", "Riesgo", "Cambio esperado (%)",
-        "Volatilidad 60d (%)", "Peso (%)", "Monto sugerido"
+        "Volatilidad 60d (%)", "Peso (%)", "Monto sugerido", "Motivo de elección"
     ]].rename(columns={
         "Señal visual": "Señal",
         "Cambio esperado (%)": f"Cambio esperado al horizonte (%)",
@@ -1010,8 +1164,9 @@ def build_personalized_portfolio(scored_df, df_rs, amount, profile_info, goal, h
     cash_ok = cash_pct >= max(0.0, profile_info["cash_base"] - 0.05)
     concentration_ok = max_weight_pct <= profile_info["max_peso"] * 100 + 2
     diversification_ok = (
-        len(selected_assets) >= min(2, infer_asset_count(amount, profile_info["n_base"]))
-        or amount < 20000
+        len(selected_assets) >= min(2, target_assets)
+        or amount < 20_000
+        or eligible_assets < min(2, target_assets)
     )
     no_baja_ok = "BAJA" not in (
         scored_df.set_index("Emisora").reindex(selected_assets)["Señal"].fillna("").tolist()
@@ -1034,9 +1189,9 @@ def build_personalized_portfolio(scored_df, df_rs, amount, profile_info, goal, h
             "Detalle": f"Peso máximo en una sola emisora: {fmt_pct(max_weight_pct, 1)}.",
         },
         {
-            "Chequeo": "Diversificación mínima",
+            "Chequeo": "Diversificación según monto",
             "Resultado": "✅ Sí" if diversification_ok else "⚠️ Revisar",
-            "Detalle": f"Emisoras seleccionadas: {len(selected_assets)}.",
+            "Detalle": f"Objetivo por monto: {target_assets} emisora(s). Elegibles reales con filtros: {eligible_assets}. Seleccionadas: {len(selected_assets)}.",
         },
         {
             "Chequeo": "Evita señales claramente negativas",
@@ -1055,8 +1210,11 @@ def build_personalized_portfolio(scored_df, df_rs, amount, profile_info, goal, h
             "portfolio_conf": portfolio_conf,
             "selected_count": len(selected_assets),
             "profile": profile,
+            "target_assets": target_assets,
+            "eligible_assets": eligible_assets,
         },
     }
+
 
 
 # ===================== AYUDAS VISUALES =====================
@@ -1086,6 +1244,35 @@ def confianza_texto(conf):
     if conf >= 0.08:
         return "Media"
     return "Baja"
+
+
+def build_daily_projection_path(res):
+    """
+    Genera una trayectoria diaria aproximada desde el precio actual hasta el precio objetivo.
+    No es un pronóstico intradía ni una garantía; solo desagrega el cambio esperado al horizonte
+    para que el usuario vea valores día por día.
+    """
+    horizon = max(1, len(pd.bdate_range(res["current_date"] + pd.offsets.BDay(1), res["target_date"])))
+    dates = pd.bdate_range(res["current_date"] + pd.offsets.BDay(1), periods=horizon)
+
+    current_price = float(res["current_price"])
+    projected_price = float(res["projected_price"])
+
+    if current_price <= 0 or not np.isfinite(current_price) or not np.isfinite(projected_price):
+        return pd.DataFrame(columns=["Fecha", "Día hábil", "Precio estimado", "Cambio acumulado (%)"])
+
+    daily_factor = (projected_price / current_price) ** (1 / horizon)
+    prices = [current_price * (daily_factor ** i) for i in range(1, horizon + 1)]
+
+    out = pd.DataFrame({
+        "Fecha": dates.date,
+        "Día hábil": np.arange(1, horizon + 1),
+        "Precio estimado": prices,
+    })
+    out["Cambio acumulado (%)"] = (out["Precio estimado"] / current_price - 1) * 100
+    out["Precio estimado"] = out["Precio estimado"].round(2)
+    out["Cambio acumulado (%)"] = out["Cambio acumulado (%)"].round(2)
+    return out
 
 
 def explicar_error_simple(m):
@@ -1120,7 +1307,7 @@ except Exception as e:
 # ===================== ESTADO DE PERFIL =====================
 def set_default_state():
     defaults = {
-        "monto_inversion": 50000,
+        "monto_inversion": DEFAULT_INVESTMENT_AMOUNT,
         "horizonte_valor": DEFAULT_HORIZON_DAYS,
         "tolerancia_riesgo": 3,
         "objetivo_inversion": "Balance entre crecimiento y estabilidad",
@@ -1141,55 +1328,73 @@ set_default_state()
 # ===================== SIDEBAR =====================
 st.sidebar.title("Tu perfil de inversión")
 st.sidebar.caption(
-    "Llena este formulario para que el panel adapte el horizonte, el perfil y la cartera sugerida. "
-    "El horizonte siempre será de 1 a 10 días hábiles."
+    "Flujo inspirado en un cuestionario de perfil: monto, horizonte, tolerancia al riesgo y objetivo. "
+    "El horizonte operativo del modelo se mantiene entre 1 y 10 días hábiles."
 )
 
 with st.sidebar.form("perfil_usuario_form"):
     monto_inversion = st.number_input(
-        "Monto a invertir", min_value=1000,
-        value=int(st.session_state["monto_inversion"]), step=1000
+        "Monto a invertir",
+        min_value=MIN_INVESTMENT_AMOUNT,
+        max_value=MAX_INVESTMENT_AMOUNT,
+        value=int(np.clip(st.session_state["monto_inversion"], MIN_INVESTMENT_AMOUNT, MAX_INVESTMENT_AMOUNT)),
+        step=1000,
+        help=(
+            f"El simulador acepta montos entre ${MIN_INVESTMENT_AMOUNT:,.0f} y "
+            f"${MAX_INVESTMENT_AMOUNT:,.0f} MXN. El monto no promete más rendimiento, "
+            "solo modifica la diversificación sugerida."
+        ),
     )
+
     horizonte_valor = st.slider(
         "Horizonte de inversión (días hábiles)",
         min_value=1,
         max_value=MAX_HORIZON_DAYS,
         value=int(horizon_to_business_days(st.session_state["horizonte_valor"])),
-        help="En esta versión el modelo siempre trabaja con un máximo de 10 días hábiles.",
+        help=(
+            "En esta versión el modelo GAMMA trabaja a corto plazo. "
+            "Por alcance del TT, no se modelan horizontes de meses o años."
+        ),
     )
+
     tolerancia_riesgo = st.slider(
         "¿Qué tanto riesgo aceptas?",
-        min_value=1, max_value=5,
+        min_value=1,
+        max_value=5,
         value=int(st.session_state["tolerancia_riesgo"]),
-        help="1 = muy poco, 5 = alto",
+        help=(
+            "1 = prefieres estabilidad y menor variación. "
+            "5 = aceptas movimientos fuertes para buscar mayor rendimiento."
+        ),
     )
+    st.caption(RISK_LEVEL_DESCRIPTIONS[int(tolerancia_riesgo)])
+
     objetivo_inversion = st.selectbox(
         "¿Qué quieres lograr con tu inversión?",
-        options=[
-            "Cuidar mi dinero",
-            "Balance entre crecimiento y estabilidad",
-            "Hacer crecer mi inversión",
-            "Buscar una oportunidad más agresiva",
-        ],
-        index=[
-            "Cuidar mi dinero",
-            "Balance entre crecimiento y estabilidad",
-            "Hacer crecer mi inversión",
-            "Buscar una oportunidad más agresiva",
-        ].index(st.session_state["objetivo_inversion"]),
+        options=INVESTMENT_GOALS,
+        index=INVESTMENT_GOALS.index(st.session_state["objetivo_inversion"]),
+        help="El objetivo ajusta la reserva, la tolerancia a volatilidad y el peso del rendimiento esperado.",
     )
+    st.caption(f"{GOAL_EMOJI[objetivo_inversion]} {GOAL_DESCRIPTIONS[objetivo_inversion]}")
+
+    with st.expander("¿Qué significa cada objetivo?"):
+        for goal_name in INVESTMENT_GOALS:
+            st.markdown(f"**{GOAL_EMOJI[goal_name]} {goal_name}:** {GOAL_DESCRIPTIONS[goal_name]}")
+
     profile_submit = st.form_submit_button("Aplicar perfil")
 
 if profile_submit:
-    st.session_state["monto_inversion"] = monto_inversion
+    old_horizon = st.session_state.get("horizonte_valor")
+    st.session_state["monto_inversion"] = float(np.clip(monto_inversion, MIN_INVESTMENT_AMOUNT, MAX_INVESTMENT_AMOUNT))
     st.session_state["horizonte_valor"] = horizonte_valor
     st.session_state["tolerancia_riesgo"] = tolerancia_riesgo
     st.session_state["objetivo_inversion"] = objetivo_inversion
-    # Si cambia el horizonte, el scan anterior ya no aplica
-    if horizonte_valor != st.session_state.get("horizonte_valor"):
+
+    # Si cambia el horizonte, el scan anterior ya no aplica.
+    # Antes se comparaba después de asignar el valor y nunca limpiaba caché.
+    if horizonte_valor != old_horizon:
         st.session_state["_scan_key"] = ""
-    # NO hacemos st.rerun() — Streamlit re-renderiza solo al enviar el form,
-    # lo que preserva la pestaña activa sin necesidad de rerun explícito.
+        st.session_state["_scan_result"] = pd.DataFrame()
 
 selected_horizon_days = horizon_to_business_days(st.session_state["horizonte_valor"])
 selected_horizon_label = human_horizon_label(st.session_state["horizonte_valor"])
@@ -1206,6 +1411,15 @@ st.sidebar.success(
     f"Objetivo: {st.session_state['objetivo_inversion']}"
 )
 st.sidebar.caption(profile_info["descripcion"])
+
+st.sidebar.info(
+    f"{profile_info['objetivo_icono']} {st.session_state['objetivo_inversion']}\n\n"
+    f"{profile_info['objetivo_detalle']}\n\n"
+    f"Riesgo seleccionado: {profile_info['riesgo_detalle']}\n\n"
+    f"Meta mínima conceptual para cuidar poder adquisitivo en {selected_horizon_days} días: "
+    f"{fmt_pct(profile_info['meta_minima_horizonte'], 3)}."
+)
+
 
 ultima_fecha_global = pd.to_datetime(raw["date"].max()).date()
 primera_fecha_global = pd.to_datetime(raw["date"].min()).date()
@@ -1603,6 +1817,29 @@ elif view == "Pronóstico":
             m3.metric("Precio estimado", fmt_num(res["projected_price"], 2))
             m4.metric("Cambio esperado", fmt_pct(res["expected_ret_pct"], 2))
 
+            st.markdown("### Trayectoria diaria estimada")
+            daily_projection = build_daily_projection_path(res)
+            st.dataframe(daily_projection, width="stretch")
+
+            fig_daily = go.Figure()
+            fig_daily.add_trace(go.Scatter(
+                x=[res["current_date"].date()] + daily_projection["Fecha"].tolist(),
+                y=[res["current_price"]] + daily_projection["Precio estimado"].tolist(),
+                mode="lines+markers",
+                name="Precio estimado diario",
+            ))
+            fig_daily.update_layout(
+                title="Estimación diaria desde el precio actual hasta el precio objetivo",
+                xaxis_title="Fecha",
+                yaxis_title="Precio estimado",
+            )
+            st.plotly_chart(fig_daily, width="stretch")
+            help_box(
+                "Esta trayectoria diaria no significa que el precio vaya a moverse exactamente así cada día. "
+                "Solo reparte el cambio esperado del modelo en días hábiles para que el resultado no quede "
+                "como un simple 'sube' o 'baja'."
+            )
+
             st.markdown("### Qué tan bien ha funcionado")
             a1, a2, a3 = st.columns(3)
             a1.metric("Acierto de dirección", fmt_pct(res["met_F"]["hit_rate"], 2))
@@ -1721,6 +1958,13 @@ elif view == "Mi perfil y cartera":
         "la propuesta sí encaja contigo."
     )
 
+    st.info(
+        "El flujo es tipo cuestionario: primero se capturan preferencias, después se clasifica el perfil "
+        "y finalmente se propone una distribución. No es una orden de compra, sino una simulación académica "
+        "basada en datos históricos diarios."
+    )
+
+
     if not tickers_all:
         st.info("No hay emisoras suficientes.")
     elif market_scan.empty:
@@ -1758,12 +2002,18 @@ elif view == "Mi perfil y cartera":
             s3.metric("Cambio esperado cartera", fmt_pct(portfolio_pack["summary"]["portfolio_expected_ret"], 2))
             s4.metric("Volatilidad estimada", fmt_pct(portfolio_pack["summary"]["portfolio_vol"], 2))
             st.caption(
-                f"Confianza promedio ponderada de la cartera: {confianza_texto(portfolio_pack['summary']['portfolio_conf'])}."
+                f"Confianza promedio ponderada de la cartera: {confianza_texto(portfolio_pack['summary']['portfolio_conf'])}. "
+                f"Por el monto ingresado, el objetivo era revisar hasta {portfolio_pack['summary'].get('target_assets', 0)} emisora(s); "
+                f"pasaron filtros {portfolio_pack['summary'].get('eligible_assets', 0)}."
             )
 
         st.markdown("### 3) Distribución sugerida del dinero")
         portfolio_df = portfolio_pack["portfolio"].copy()
         st.dataframe(portfolio_df, width="stretch")
+        help_box(
+            "La columna 'Motivo de elección' explica por qué aparece cada emisora o la reserva. "
+            "Si ingresas un monto mayor, el sistema puede sugerir más emisoras, pero solo hasta donde existan activos elegibles."
+        )
 
         pie_df = portfolio_df[["Emisora", "Peso (%)"]].copy()
         pie_df = pie_df[pie_df["Peso (%)"] > 0]
@@ -1791,8 +2041,10 @@ elif view == "Mi perfil y cartera":
         st.markdown("### 6) Interpretación sencilla")
         interp = [
             f"Tu perfil se clasificó como {profile_info['perfil'].lower()}.",
+            f"Tu objetivo fue: {st.session_state['objetivo_inversion'].lower()}.",
             f"El análisis se hizo para un horizonte de {selected_horizon_label.lower()}.",
             f"La cartera sugiere mantener aproximadamente {fmt_pct(portfolio_pack['summary']['cash_pct'] * 100, 1)} en reserva.",
+            f"Por el monto ingresado, el sistema podía revisar hasta {portfolio_pack['summary'].get('target_assets', 0)} emisora(s), pero solo selecciona las que pasan filtros de señal, riesgo y confianza.",
         ]
         if portfolio_pack["summary"]["selected_count"] > 0:
             interp.append(
