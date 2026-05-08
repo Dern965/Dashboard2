@@ -22,7 +22,7 @@ on:
   # Para cubrir ambos casos sin solapamiento con horario de apertura
   # de la BMV (9:30am), usamos 13:00 UTC (= 7am CST / 8am CDT).
   schedule:
-    - cron: "0 13 * * 1-5"   # Lunes a Viernes a las 13:00 UTC
+    - cron: "0 * * * 1-5"    # Lunes a Viernes a cada hora
 
   # ── Ejecución manual desde la UI de GitHub ────────────────────
   workflow_dispatch:
