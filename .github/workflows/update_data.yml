@@ -1,28 +1,43 @@
 # .github/workflows/update_data.yml
 #
-# GitHub Actions — Actualización diaria de datos BMV
-# ====================================================
-# Este workflow se ejecuta automáticamente todos los días hábiles
-# a las 7:00 AM hora Ciudad de México (13:00 UTC invierno / 12:00 UTC verano).
+# GitHub Actions — Actualización de datos BMV
+# ==========================================
+# Este workflow actualiza automáticamente el archivo market_prices.csv
+# con datos recientes del mercado mexicano.
+#
+# Se ejecuta de lunes a viernes en dos momentos:
+#   1. A las 7:30 AM, hora Ciudad de México, cerca de la apertura del mercado
+#   2. A las 3:00 PM, hora Ciudad de México, después del cierre para intentar guardar
+#      los datos finales del día
 #
 # También se puede lanzar manualmente desde la pestaña "Actions" de GitHub.
 #
 # Qué hace:
 #   1. Clona el repositorio
-#   2. Instala dependencias (yfinance, pandas, numpy)
-#   3. Ejecuta update_data.py → descarga solo los días nuevos de yfinance
-#   4. Si hay cambios en el CSV, hace commit y push automáticamente
-#   5. Guarda el log de ejecución como artefacto descargable
+#   2. Configura Python
+#   3. Instala dependencias mínimas
+#   4. Ejecuta update_data.py para actualizar datos/market_prices.csv
+#   5. Muestra el log de actualización
+#   6. Detecta si hubo cambios reales en el CSV
+#   7. Si hay cambios, hace commit y push automáticamente
+#   8. Guarda el log como artefacto descargable
 
-name: "📈 Actualización diaria de datos BMV"
+name: "📈 Actualización de datos BMV"
 
 on:
   # ── Horario automático ────────────────────────────────────────
-  # Zona CDMX: UTC-6 (invierno CST) | UTC-5 (verano CDT)
-  # Para cubrir ambos casos sin solapamiento con horario de apertura
-  # de la BMV (9:30am), usamos 13:00 UTC (= 7am CST / 8am CDT).
+  # GitHub Actions permite programar workflows con cron.
+  # Se usa la zona horaria America/Mexico_City para evitar convertir manualmente a UTC.
+  #
+  # Ejecuciones:
+  #   - 07:30 CDMX, lunes a viernes
+  #   - 15:00 CDMX, lunes a viernes
   schedule:
-    - cron: "0 * * * 1-5"    # Lunes a Viernes a cada hora
+    - cron: "30 7 * * 1-5"     # Apertura / inicio de jornada
+      timezone: "America/Mexico_City"
+
+    - cron: "0 15 * * 1-5"     # Después del cierre del mercado
+      timezone: "America/Mexico_City"
 
   # ── Ejecución manual desde la UI de GitHub ────────────────────
   workflow_dispatch:
@@ -34,35 +49,42 @@ on:
         type: boolean
 
 # ──────────────────────────────────────────────────────────────────
-# Permisos: necesarios para hacer commit y push al repo
+# Permisos necesarios para que GitHub Actions pueda hacer commit y push
 # ──────────────────────────────────────────────────────────────────
 permissions:
   contents: write
+
+# ──────────────────────────────────────────────────────────────────
+# Evita que se encimen dos ejecuciones del mismo workflow
+# ──────────────────────────────────────────────────────────────────
+concurrency:
+  group: update-market-data
+  cancel-in-progress: false
 
 jobs:
   update-market-data:
     name: "Descargar y actualizar market_prices.csv"
     runs-on: ubuntu-latest
-    timeout-minutes: 30          # Abortar si tarda más de 30 min
+    timeout-minutes: 30
 
     steps:
       # ── 1. Checkout del repositorio ───────────────────────────────
       - name: "📥 Clonar repositorio"
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
-          fetch-depth: 1         # Solo el último commit (más rápido)
+          fetch-depth: 1
 
-      # ── 2. Instalar Python ────────────────────────────────────────
+      # ── 2. Configurar Python ──────────────────────────────────────
       - name: "🐍 Configurar Python 3.11"
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-          cache: "pip"           # Cachear dependencias entre runs
+          cache: "pip"
 
       # ── 3. Instalar dependencias mínimas del script ───────────────
       - name: "📦 Instalar dependencias"
         run: |
-          pip install --upgrade pip
+          python -m pip install --upgrade pip
           pip install yfinance pandas numpy pytz
 
       # ── 4. Ejecutar el script de actualización ────────────────────
@@ -72,28 +94,30 @@ jobs:
           python update_data.py \
             --csv datos/market_prices.csv \
             --log datos/update.log
-        continue-on-error: true   # No marcar el workflow como fallido si hay
-                                   # errores parciales (ej. 1 ticker offline)
+        continue-on-error: true
 
       # ── 5. Mostrar resumen del log en la interfaz de GitHub ───────
       - name: "📋 Mostrar log de actualización"
         if: always()
         run: |
           echo "====== LOG DE ACTUALIZACIÓN ======"
-          cat datos/update.log || echo "(log vacío)"
+          cat datos/update.log || echo "(log vacío o no generado)"
 
       # ── 6. Verificar si hubo cambios en el CSV ────────────────────
       - name: "🔍 Detectar cambios"
         id: changes
         run: |
           git diff --name-only datos/market_prices.csv
+
           if git diff --quiet datos/market_prices.csv; then
             echo "has_changes=false" >> $GITHUB_OUTPUT
             echo "No hay datos nuevos. El CSV ya estaba al día."
           else
             echo "has_changes=true" >> $GITHUB_OUTPUT
+
             ROWS=$(python -c "import pandas as pd; df=pd.read_csv('datos/market_prices.csv'); print(len(df))")
             echo "rows=$ROWS" >> $GITHUB_OUTPUT
+
             echo "Se detectaron cambios en el CSV ($ROWS filas totales)."
           fi
 
@@ -101,10 +125,9 @@ jobs:
       - name: "💾 Commit y push de datos actualizados"
         if: steps.changes.outputs.has_changes == 'true'
         run: |
-          git config user.name  "github-actions[bot]"
+          git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Fecha actual en zona México para el mensaje de commit
           FECHA=$(TZ="America/Mexico_City" date "+%Y-%m-%d %H:%M CDMX")
 
           git add datos/market_prices.csv datos/update.log
@@ -119,8 +142,9 @@ jobs:
       # ── 9. Guardar log como artefacto descargable ─────────────────
       - name: "📁 Guardar log como artefacto"
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: "log-actualizacion-${{ github.run_id }}"
           path: datos/update.log
-          retention-days: 14     # Conservar logs 14 días
+          retention-days: 14
+          if-no-files-found: warn
