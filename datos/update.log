@@ -1942,3 +1942,57 @@
 2026-05-18 14:39:08,560 [INFO]   Tickers con error:    1
 2026-05-18 14:39:08,560 [INFO]   Filas nuevas totales: 33
 2026-05-18 14:39:08,560 [INFO] ──────────────────────────────────────────────────
+2026-05-18 21:25:53,379 [INFO] ============================================================
+2026-05-18 21:25:53,379 [INFO]   ACTUALIZACIÓN DIARIA DE DATOS — 2026-05-18 21:25 UTC
+2026-05-18 21:25:53,379 [INFO] ============================================================
+2026-05-18 21:25:53,379 [INFO] Leyendo CSV existente: datos/market_prices.csv
+2026-05-18 21:25:53,525 [INFO] Tickers detectados: 34
+2026-05-18 21:25:53,539 [INFO] Fecha hoy (CDMX): 2026-05-18
+2026-05-18 21:25:53,539 [INFO]   [AC_MX] Ya está al día (2026-05-18) — omitido
+2026-05-18 21:25:53,539 [INFO]   [ALPEKA_MX] Ya está al día (2026-05-18) — omitido
+2026-05-18 21:25:53,540 [INFO]   [ALSEA_MX] Ya está al día (2026-05-18) — omitido
+2026-05-18 21:25:53,540 [INFO]   [AMXB_MX] Ya está al día (2026-05-18) — omitido
+2026-05-18 21:25:53,540 [INFO]   [ASURB_MX] Ya está al día (2026-05-18) — omitido
+2026-05-18 21:25:53,540 [INFO]   [BBAJIOO_MX] Ya está al día (2026-05-18) — omitido
+2026-05-18 21:25:53,540 [INFO]   [BIMBOA_MX] Ya está al día (2026-05-18) — omitido
+2026-05-18 21:25:53,540 [INFO]   [BOLSAA_MX] Ya está al día (2026-05-18) — omitido
+2026-05-18 21:25:53,540 [INFO]   [CEMEXCPO_MX] Ya está al día (2026-05-18) — omitido
+2026-05-18 21:25:53,540 [INFO]   [CUERVO_MX] Ya está al día (2026-05-18) — omitido
+2026-05-18 21:25:53,540 [INFO]   [ELEKTRA_MX] Descargando desde 2026-04-28 → ELEKTRA.MX
+2026-05-18 21:25:54,129 [ERROR] HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"Quote not found for symbol: ELEKTRA.MX"}}}
+2026-05-18 21:25:54,248 [ERROR] $ELEKTRA.MX: possibly delisted; no timezone found
+2026-05-18 21:25:54,249 [WARNING]   [ELEKTRA_MX] Sin datos nuevos
+2026-05-18 21:25:55,049 [INFO]   [FEMSAUBD_MX] Ya está al día (2026-05-18) — omitido
+2026-05-18 21:25:55,050 [INFO]   [GAPB_MX] Ya está al día (2026-05-18) — omitido
+2026-05-18 21:25:55,050 [INFO]   [GCARSOA1_MX] Ya está al día (2026-05-18) — omitido
+2026-05-18 21:25:55,050 [INFO]   [GCC_MX] Ya está al día (2026-05-18) — omitido
+2026-05-18 21:25:55,050 [INFO]   [GFINBURO_MX] Ya está al día (2026-05-18) — omitido
+2026-05-18 21:25:55,050 [INFO]   [GFNORTEO_MX] Ya está al día (2026-05-18) — omitido
+2026-05-18 21:25:55,050 [INFO]   [GMEXICOB_MX] Ya está al día (2026-05-18) — omitido
+2026-05-18 21:25:55,050 [INFO]   [GRUMAB_MX] Ya está al día (2026-05-18) — omitido
+2026-05-18 21:25:55,050 [INFO]   [KIMBERA_MX] Ya está al día (2026-05-18) — omitido
+2026-05-18 21:25:55,050 [INFO]   [KOFUBL_MX] Ya está al día (2026-05-18) — omitido
+2026-05-18 21:25:55,050 [INFO]   [LABB_MX] Ya está al día (2026-05-18) — omitido
+2026-05-18 21:25:55,050 [INFO]   [LIVEPOLC-1_MX] Descargando desde 2026-05-16 → LIVEPOLC-1.MX
+2026-05-18 21:25:55,340 [INFO]   [LIVEPOLC-1_MX] +1 filas nuevas ✓
+2026-05-18 21:25:56,140 [INFO]   [MEGACPO_MX] Ya está al día (2026-05-18) — omitido
+2026-05-18 21:25:56,140 [INFO]   [OMAB_MX] Ya está al día (2026-05-18) — omitido
+2026-05-18 21:25:56,140 [INFO]   [ORBIA_MX] Ya está al día (2026-05-18) — omitido
+2026-05-18 21:25:56,140 [INFO]   [PE&OLES_MX] Ya está al día (2026-05-18) — omitido
+2026-05-18 21:25:56,140 [INFO]   [PINFRAL_MX] Descargando desde 2026-05-16 → PINFRAL.MX
+2026-05-18 21:25:56,414 [INFO]   [PINFRAL_MX] +1 filas nuevas ✓
+2026-05-18 21:25:57,214 [INFO]   [Q_MX] Ya está al día (2026-05-18) — omitido
+2026-05-18 21:25:57,215 [INFO]   [RA_MX] Ya está al día (2026-05-18) — omitido
+2026-05-18 21:25:57,215 [INFO]   [TLEVISACPO_MX] Ya está al día (2026-05-18) — omitido
+2026-05-18 21:25:57,215 [INFO]   [VESTA_MX] Ya está al día (2026-05-18) — omitido
+2026-05-18 21:25:57,215 [INFO]   [VOLARA_MX] Ya está al día (2026-05-18) — omitido
+2026-05-18 21:25:57,215 [INFO]   [WALMEX_MX] Ya está al día (2026-05-18) — omitido
+2026-05-18 21:25:58,024 [INFO] 
+✅ CSV actualizado: datos/market_prices.csv  (180,819 filas totales, +2 nuevas)
+2026-05-18 21:25:58,025 [INFO] 
+── Resumen ──────────────────────────────────────
+2026-05-18 21:25:58,025 [INFO]   Tickers actualizados: 2
+2026-05-18 21:25:58,025 [INFO]   Tickers sin cambios:  31
+2026-05-18 21:25:58,025 [INFO]   Tickers con error:    1
+2026-05-18 21:25:58,025 [INFO]   Filas nuevas totales: 2
+2026-05-18 21:25:58,025 [INFO] ──────────────────────────────────────────────────
