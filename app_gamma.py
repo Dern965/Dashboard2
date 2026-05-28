@@ -1446,6 +1446,34 @@ def help_box(text):
     st.info(text)
 
 
+def chart_reason_box(chart_name, reason):
+    """Explicación breve para justificar por qué se usa una gráfica ante usuarios no técnicos."""
+    st.caption(f"📌 Por qué se usa esta visualización: {reason}")
+
+
+def show_readable_dataframe(df, height=None, text_columns=None, hide_index=True):
+    """
+    Muestra tablas con columnas de texto amplias para evitar que la explicación quede cortada.
+    Si la versión de Streamlit no soporta column_config, cae al dataframe normal.
+    """
+    text_columns = text_columns or []
+    try:
+        column_config = {
+            col: st.column_config.TextColumn(col, width="large")
+            for col in text_columns
+            if col in df.columns
+        }
+        st.dataframe(
+            df,
+            width="stretch",
+            height=height,
+            hide_index=hide_index,
+            column_config=column_config,
+        )
+    except Exception:
+        st.dataframe(df, width="stretch", height=height)
+
+
 PROFILE_UI_STYLES = {
     "Conservador": {"emoji": "🟢", "color": "#0F766E", "bg": "#ECFDF5", "label": "Tranquilidad / protección"},
     "Moderado": {"emoji": "🟡", "color": "#B45309", "bg": "#FFFBEB", "label": "Equilibrio / advertencia media"},
@@ -1509,24 +1537,24 @@ def assess_profile_consistency(amount, risk_tolerance, goal, horizon_days, profi
         icon = {"OK": "✅", "Atención": "⚠️", "Nota": "ℹ️"}.get(level, "ℹ️")
         rows.append({"Estado": f"{icon} {level}", "Aspecto": topic, "Lectura": message})
 
-    add("OK", "Perfil", f"Con las respuestas actuales, el sistema clasifica al usuario como {profile_info['perfil'].lower()}.")
+    add("OK", "Perfil", f"Con las respuestas actuales, el dashboard clasifica al usuario como {profile_info['perfil'].lower()}.")
 
     if amount < 20_000 and risk_tolerance >= 4:
         add("Atención", "Monto vs riesgo", "El monto es bajo y el riesgo seleccionado es alto. Para evitar fragmentar demasiado la inversión, la cartera puede quedar concentrada en pocas emisoras.")
     elif amount >= 500_000 and profile_info["perfil"] == "Conservador":
         add("Nota", "Monto alto conservador", "El monto permite diversificar más, pero el perfil conservador mantiene una reserva elevada y prefiere emisoras menos volátiles.")
     else:
-        add("OK", "Monto", "El monto seleccionado es compatible con la lógica de diversificación del sistema.")
+        add("OK", "Monto", "El monto seleccionado es compatible con la lógica de diversificación del dashboard.")
 
     if horizon_days <= 3 and risk_tolerance >= 4:
-        add("Atención", "Horizonte vs riesgo", "Un horizonte muy corto con riesgo alto puede generar resultados más variables. El sistema mostrará niveles de salida y alerta para acotar la decisión.")
+        add("Atención", "Horizonte vs riesgo", "Un horizonte muy corto con riesgo alto puede generar resultados más variables. El dashboard mostrará niveles de salida y alerta para acotar la decisión.")
     elif horizon_days <= 3:
         add("Nota", "Horizonte corto", "El horizonte es de muy corto plazo; cualquier noticia puede alterar el comportamiento del precio.")
     else:
         add("OK", "Horizonte", "El horizonte elegido se mantiene dentro del alcance de corto plazo del modelo GAMMA.")
 
     if goal == "Cuidar mi dinero" and risk_tolerance >= 4:
-        add("Atención", "Objetivo vs riesgo", "El objetivo de cuidar el dinero no coincide del todo con una tolerancia de riesgo alta. El sistema compensará aumentando criterios de protección.")
+        add("Atención", "Objetivo vs riesgo", "El objetivo de cuidar el dinero no coincide del todo con una tolerancia de riesgo alta. El dashboard compensará aumentando criterios de protección.")
     elif goal == "Buscar una oportunidad más agresiva" and risk_tolerance <= 2:
         add("Atención", "Objetivo vs riesgo", "El objetivo agresivo contrasta con una tolerancia baja al riesgo. La recomendación puede quedar limitada por los filtros de seguridad.")
     else:
@@ -1575,7 +1603,7 @@ def compute_strategy_levels(row, horizon_days):
     else:
         action = "No comprar / evitar"
         exit_level = np.nan
-        lectura = "La señal no favorece una entrada de compra. El sistema evita esta emisora salvo que no existan alternativas elegibles."
+        lectura = "La señal no favorece una entrada de compra. El dashboard evita esta emisora salvo que no existan alternativas elegibles."
 
     return pd.Series({
         "Precio actual": round(current, 2),
@@ -1688,7 +1716,8 @@ def build_historical_portfolio_simulation(portfolio_df, df_rs, amount, horizon_d
     hist = hist.groupby("Fecha", as_index=False)[[
         "Rendimiento modelo ponderado (%)",
         "Rendimiento compra y mantén ponderado (%)",
-    ]].sum().sort_values("Fecha")
+    ]].sum().sort_values("Fecha").reset_index(drop=True)
+    hist.insert(0, "Periodo simulado", np.arange(1, len(hist) + 1))
 
     hist["Capital modelo"] = amount * np.cumprod(1 + hist["Rendimiento modelo ponderado (%)"] / 100)
     hist["Capital compra y mantén"] = amount * np.cumprod(1 + hist["Rendimiento compra y mantén ponderado (%)"] / 100)
@@ -1936,7 +1965,7 @@ if view == "Inicio":
     )
     st.markdown(
         "La idea es simple: tú nos dices **cuánto dinero tienes disponible, cuántos días quieres esperar, "
-        "qué tanto riesgo estás dispuesto a asumir y qué quieres lograr con tu inversión**, y el sistema "
+        "qué tanto riesgo estás dispuesto a asumir y qué quieres lograr con tu inversión**, y el dashboard "
         "analiza el comportamiento histórico de empresas que cotizan en la Bolsa Mexicana de Valores (BMV) "
         "para darte una idea de qué podría pasar con tu dinero. Todo en pesos mexicanos, sin registros "
         "ni datos personales."
@@ -1963,11 +1992,20 @@ if view == "Inicio":
     st.markdown("## 📘 Conceptos que debes conocer")
     st.caption("No necesitas ser experto. Aquí te explicamos, en palabras sencillas, los términos que verás en el panel.")
 
+    with st.expander("¿Por qué se eligieron estas gráficas en el dashboard?"):
+        st.markdown(
+            "- **Líneas de precio:** se usan para ver la trayectoria en el tiempo, porque una inversión no se entiende solo con un número final.\n"
+            "- **Barras comparativas:** se usan para comparar porcentajes entre emisoras de forma rápida, por ejemplo acierto del modelo contra volatilidad.\n"
+            "- **Pastel de cartera:** se usa para mostrar visualmente cómo se reparte el dinero entre emisoras y reserva.\n"
+            "- **Líneas de simulación:** se usan para comparar cómo habría cambiado el capital siguiendo el modelo frente a comprar y mantener.\n"
+            "- **Tablas explicativas:** se usan cuando el dato necesita contexto, como validaciones, motivos de elección y niveles de alerta."
+        )
+
     with st.expander("¿Qué es el Modelo Gamma?"):
         st.markdown(
             "El **Modelo Gamma** es el motor de análisis que usa este panel. "
-            "No es una fórmula mágica ni una bola de cristal — es un sistema que **compara la situación actual "
-            "de una empresa con situaciones similares del pasado** y revisa qué ocurrió después.\n\n"
+            "No es una fórmula mágica ni una bola de cristal; dentro del dashboard funciona como un método que "
+            "**compara la situación actual de una empresa con situaciones similares del pasado** y revisa qué ocurrió después.\n\n"
             "Por ejemplo: si en los últimos días el precio de una acción tuvo un patrón de movimientos muy "
             "parecido al que tuvo hace tres años, el modelo toma eso en cuenta para estimar qué podría pasar "
             "en los próximos días.\n\n"
@@ -2044,9 +2082,9 @@ if view == "Inicio":
     st.markdown("---")
 
 
-    with st.expander("Alcance del sistema: corto plazo y Bolsa Mexicana de Valores"):
+    with st.expander("Alcance del dashboard: corto plazo y Bolsa Mexicana de Valores"):
         st.markdown(
-            "El sistema se limita a **emisoras de la Bolsa Mexicana de Valores** para mantener consistencia "
+            "El dashboard se limita a **emisoras de la Bolsa Mexicana de Valores** para mantener consistencia "
             "en moneda, disponibilidad de datos y alcance académico. El modelo GAMMA trabaja con datos diarios "
             "y un horizonte máximo de **10 días hábiles**, por lo que se interpreta como una herramienta de "
             "apoyo para análisis de corto plazo.\n\n"
@@ -2057,7 +2095,7 @@ if view == "Inicio":
 
     with st.expander("Cómo se combinan GAMMA, perfil y cartera"):
         st.markdown(
-            "El sistema tiene tres capas separadas:\n\n"
+            "El dashboard tiene tres capas separadas:\n\n"
             "1. **Datos históricos → Modelo GAMMA → Señales de emisoras**. GAMMA analiza patrones de precios y genera señales como SUBE, BAJA o ESPERAR.\n"
             "2. **Usuario → Perfil inversionista**. El perfil no lo decide GAMMA; se calcula con monto, horizonte, tolerancia al riesgo y objetivo.\n"
             "3. **Perfil + señales → Cartera sugerida**. La distribución final combina la señal del modelo con la compatibilidad de cada emisora con el perfil del usuario."
@@ -2125,6 +2163,10 @@ elif view == "Vista general":
                 tmp = tmp.divide(base) * 100
 
             st.line_chart(tmp, width="stretch")
+            chart_reason_box(
+                "Línea de precios",
+                "permite ver la evolución completa de cada emisora y detectar subidas, caídas o periodos de estabilidad sin depender solo del último precio."
+            )
 
             st.markdown("### Resumen comparativo")
             st.caption("Estos indicadores toman los últimos 252 días hábiles para mantener coherencia con el enfoque de corto plazo.")
@@ -2169,6 +2211,10 @@ elif view == "Entender una emisora":
                 fig.add_scatter(x=y.index, y=y.values, mode="lines", name="Precio")
                 fig.update_layout(title=f"Evolución del precio de {t}", xaxis_title="Fecha", yaxis_title="Precio")
                 st.plotly_chart(fig, width="stretch")
+                chart_reason_box(
+                    "Línea de precio",
+                    "se eligió porque muestra la historia de la emisora en orden temporal y ayuda a explicar si el precio viene subiendo, bajando o moviéndose lateralmente."
+                )
             with c2:
                 ret_1d = y.pct_change().dropna() * 100
                 vol_info = compute_volatility_snapshot(dt)
@@ -2197,6 +2243,10 @@ elif view == "Entender una emisora":
                 title="Comportamiento reciente de los indicadores",
             )
             st.plotly_chart(fig2, width="stretch")
+            chart_reason_box(
+                "Líneas de indicadores",
+                "se usan porque RSI, posición dentro de banda y volatilidad cambian día con día; verlos como serie temporal facilita detectar momentos de sobrecompra, sobreventa o riesgo elevado."
+            )
 
             st.markdown("### Módulo de volatilidad")
             vol_info = compute_volatility_snapshot(dt)
@@ -2291,6 +2341,10 @@ elif view == "Pronóstico":
                 yaxis_title="Precio estimado",
             )
             st.plotly_chart(fig_daily, width="stretch")
+            chart_reason_box(
+                "Trayectoria diaria estimada",
+                "convierte el pronóstico final en pasos por día hábil, para que el usuario entienda el camino aproximado y no solo vea un precio objetivo aislado."
+            )
             help_box(
                 "Esta trayectoria diaria no significa que el precio vaya a moverse exactamente así cada día. "
                 "Solo reparte el cambio esperado del modelo en días hábiles para que el resultado no quede "
@@ -2335,6 +2389,10 @@ elif view == "Pronóstico":
                 title="Comparación del desempeño acumulado",
             )
             st.plotly_chart(fig_curve, width="stretch")
+            chart_reason_box(
+                "Desempeño acumulado",
+                "permite comparar de forma visual si el modelo final habría acumulado mejor o peor resultado que comprar y mantener la emisora."
+            )
 
             df_price = pd.DataFrame({
                 "Fecha": pd.to_datetime(res["dates"]),
@@ -2350,6 +2408,10 @@ elif view == "Pronóstico":
                 title="Precio real vs precio estimado",
             )
             st.plotly_chart(fig_price, width="stretch")
+            chart_reason_box(
+                "Precio real vs precio estimado",
+                "se eligió para mostrar de manera honesta qué tan cerca quedó la estimación del comportamiento real observado en la prueba histórica."
+            )
 
 # ---------- TAB 4 ----------
 elif view == "Comparativo":
@@ -2366,28 +2428,62 @@ elif view == "Comparativo":
         st.warning("No se pudo generar el comparativo con la configuración actual.")
     else:
         rank = market_scan.sort_values("Puntaje modelo", ascending=False).reset_index(drop=True)
-        st.dataframe(rank[[
+        help_box(
+            "Cómo leer esta sección: Acierto (%) indica cuántas veces el modelo acertó la dirección en pruebas históricas; "
+            "Cambio esperado (%) es la variación proyectada al horizonte seleccionado; Volatilidad 60d (%) resume el riesgo reciente; "
+            "Puntaje modelo combina desempeño, error y confianza para ordenar las emisoras."
+        )
+        show_readable_dataframe(rank[[
             "Emisora", "Señal", "Confianza", "Acierto (%)", "Cambio esperado (%)",
             "Volatilidad 60d (%)", "MAPE (%)", "R²", "Puntaje modelo"
-        ]], width="stretch")
+        ]], height=420)
 
         st.markdown("### Top 5")
         top5 = rank.head(5)
-        st.dataframe(
+        show_readable_dataframe(
             top5[["Emisora", "Señal", "Acierto (%)", "Cambio esperado (%)", "Volatilidad 60d (%)", "Puntaje modelo"]],
-            width="stretch",
+            height=230,
         )
 
         fig_top = go.Figure()
-        fig_top.add_bar(x=top5["Emisora"], y=top5["Acierto (%)"], name="Acierto (%)")
-        fig_top.add_bar(x=top5["Emisora"], y=top5["Volatilidad 60d (%)"], name="Volatilidad 60d (%)")
+        max_y_top = float(np.nanmax([
+            top5["Acierto (%)"].max(),
+            top5["Volatilidad 60d (%)"].max(),
+        ])) if not top5.empty else 100.0
+
+        fig_top.add_trace(go.Bar(
+            x=top5["Emisora"],
+            y=top5["Acierto (%)"],
+            name="Acierto (%)",
+            text=top5["Acierto (%)"].map(lambda v: f"{v:.1f}%" if pd.notna(v) else "-"),
+            textposition="outside",
+            cliponaxis=False,
+            hovertemplate="<b>%{x}</b><br>Acierto del modelo: %{y:.2f}%<extra></extra>",
+        ))
+        fig_top.add_trace(go.Bar(
+            x=top5["Emisora"],
+            y=top5["Volatilidad 60d (%)"],
+            name="Volatilidad 60d (%)",
+            text=top5["Volatilidad 60d (%)"].map(lambda v: f"{v:.1f}%" if pd.notna(v) else "-"),
+            textposition="outside",
+            cliponaxis=False,
+            hovertemplate="<b>%{x}</b><br>Volatilidad reciente: %{y:.2f}%<extra></extra>",
+        ))
         fig_top.update_layout(
             barmode="group",
             title="Top 5: acierto del modelo vs volatilidad reciente",
             xaxis_title="Emisora",
-            yaxis_title="Valor",
+            yaxis_title="Porcentaje (%)",
+            yaxis=dict(ticksuffix="%", range=[0, max(100, max_y_top * 1.22)]),
+            margin=dict(t=70, b=70),
+            uniformtext_minsize=10,
+            uniformtext_mode="show",
         )
         st.plotly_chart(fig_top, width="stretch")
+        chart_reason_box(
+            "Barras comparativas",
+            "se eligieron porque permiten comparar porcentajes entre emisoras rápidamente; el acierto muestra desempeño histórico del modelo y la volatilidad muestra el riesgo reciente."
+        )
 
         help_box(
             "Una emisora mejor posicionada suele combinar mayor acierto, menor error y una expectativa más favorable. "
@@ -2452,6 +2548,18 @@ elif view == "Mi perfil y cartera":
                 f"Por el monto ingresado, el objetivo era revisar hasta {portfolio_pack['summary'].get('target_assets', 0)} emisora(s); "
                 f"pasaron filtros {portfolio_pack['summary'].get('eligible_assets', 0)}."
             )
+            help_box(
+                "Reserva sugerida es el porcentaje que se mantiene sin invertir para reducir exposición. "
+                "Cambio esperado cartera resume el posible rendimiento ponderado de las emisoras elegidas. "
+                "Volatilidad estimada aproxima qué tanto podría variar la cartera en un año con base en datos recientes."
+            )
+
+        with st.expander("¿Cómo leer el puntaje de perfil?"):
+            st.markdown(
+                "El puntaje de perfil no es una calificación de si eres buen o mal inversionista. "
+                "Solo resume tus respuestas: monto, horizonte, tolerancia al riesgo y objetivo. "
+                "Un valor bajo tiende a perfil conservador, uno intermedio a moderado y uno alto a agresivo."
+            )
 
         st.markdown("### 3) Validación de coherencia del perfil")
         consistency_df = assess_profile_consistency(
@@ -2461,38 +2569,50 @@ elif view == "Mi perfil y cartera":
             horizon_days=selected_horizon_days,
             profile_info=profile_info,
         )
-        st.dataframe(consistency_df, width="stretch")
+        show_readable_dataframe(consistency_df, height=260, text_columns=["Lectura"])
         help_box(
-            "Esta tabla ayuda a defender por qué el sistema recomienda más o menos emisoras según la coherencia "
+            "Esta tabla ayuda a defender por qué el dashboard recomienda más o menos emisoras según la coherencia "
             "entre monto, horizonte, riesgo y objetivo."
         )
 
         st.markdown("### 4) Distribución sugerida del dinero")
         portfolio_df = portfolio_pack["portfolio"].copy()
-        st.dataframe(portfolio_df, width="stretch")
+        show_readable_dataframe(portfolio_df, height=420, text_columns=["Motivo de elección"])
         help_box(
             "La columna 'Motivo de elección' explica por qué aparece cada emisora o la reserva. "
-            "Si ingresas un monto mayor, el sistema puede sugerir más emisoras, pero solo hasta donde existan activos elegibles."
+            "Si ingresas un monto mayor, el dashboard puede sugerir más emisoras, pero solo hasta donde existan activos elegibles."
         )
+        with st.expander("Ver motivos completos de la cartera"):
+            for _, row in portfolio_df.iterrows():
+                st.markdown(f"**{row['Emisora']} — {row['Señal']}**")
+                st.write(row["Motivo de elección"])
 
         pie_df = portfolio_df[["Emisora", "Peso (%)"]].copy()
         pie_df = pie_df[pie_df["Peso (%)"] > 0]
         fig_pie = px.pie(pie_df, names="Emisora", values="Peso (%)", title="Cómo repartir el dinero según tu perfil")
         st.plotly_chart(fig_pie, width="stretch")
+        chart_reason_box(
+            "Gráfica de pastel",
+            "se eligió porque la cartera es una distribución del 100% del dinero; así se entiende rápido cuánto va a cada emisora y cuánto queda como reserva."
+        )
 
         st.markdown("### 5) Por qué se eligieron estas emisoras")
         explain_cols = [
             "Emisora", "Señal", "Confianza", "Riesgo",
             "Cambio esperado (%)", "Volatilidad 60d (%)", "Puntaje perfil"
         ]
-        st.dataframe(scored_assets[explain_cols].head(8), width="stretch")
+        show_readable_dataframe(scored_assets[explain_cols].head(8), height=300)
         help_box(
             "El puntaje de perfil combina la señal del modelo, la confianza, la volatilidad reciente, "
             "el cambio esperado y tu objetivo personal."
         )
 
         st.markdown("### 6) Validación orientada al usuario")
-        st.dataframe(portfolio_pack["validation"], width="stretch")
+        show_readable_dataframe(portfolio_pack["validation"], height=330, text_columns=["Detalle"])
+        with st.expander("Ver validaciones completas en texto"):
+            for _, row in portfolio_pack["validation"].iterrows():
+                st.markdown(f"**{row['Resultado']} {row['Chequeo']}**")
+                st.write(row["Detalle"])
         help_box(
             "Esta validación no solo revisa si el modelo predice bien, también verifica si la cartera "
             "respeta el tipo de usuario que dijiste ser."
@@ -2504,7 +2624,7 @@ elif view == "Mi perfil y cartera":
             f"Tu objetivo fue: {st.session_state['objetivo_inversion'].lower()}.",
             f"El análisis se hizo para un horizonte de {selected_horizon_label.lower()}.",
             f"La cartera sugiere mantener aproximadamente {fmt_pct(portfolio_pack['summary']['cash_pct'] * 100, 1)} en reserva.",
-            f"Por el monto ingresado, el sistema podía revisar hasta {portfolio_pack['summary'].get('target_assets', 0)} emisora(s), pero solo selecciona las que pasan filtros de señal, riesgo y confianza.",
+            f"Por el monto ingresado, el dashboard podía revisar hasta {portfolio_pack['summary'].get('target_assets', 0)} emisora(s), pero solo selecciona las que pasan filtros de señal, riesgo y confianza.",
         ]
         if portfolio_pack["summary"]["selected_count"] > 0:
             interp.append(
@@ -2528,7 +2648,7 @@ elif view == "Mi perfil y cartera":
         if strategy_df.empty:
             st.info("No hay emisoras seleccionadas para construir niveles de salida y alerta.")
         else:
-            st.dataframe(strategy_df, width="stretch")
+            show_readable_dataframe(strategy_df, height=380, text_columns=["Lectura estratégica"])
             help_box(
                 "Esta sección convierte el resultado 'sube/baja' en una estrategia más clara: precio de partida, "
                 "precio objetivo, rendimiento esperado, nivel sugerido de salida y nivel de alerta."
@@ -2540,7 +2660,7 @@ elif view == "Mi perfil y cartera":
             portfolio_summary=portfolio_pack["summary"],
             horizon_days=selected_horizon_days,
         )
-        st.dataframe(idle_df, width="stretch")
+        show_readable_dataframe(idle_df, height=260, text_columns=["Lectura"])
         help_box(
             "La comparación usa una referencia educativa de inflación anual para mostrar que cuidar el dinero "
             "también implica pensar en poder adquisitivo, no solo en que el número de pesos no cambie."
@@ -2590,9 +2710,20 @@ elif view == "Mi perfil y cartera":
                 yaxis_title="Capital simulado",
             )
             st.plotly_chart(fig_sim, width="stretch")
-            st.dataframe(sim_df.tail(15).round(3), width="stretch")
+            chart_reason_box(
+                "Líneas de capital simulado",
+                "se eligieron para comparar dos caminos históricos: seguir la estrategia del modelo o comprar y mantener las mismas emisoras."
+            )
+
+            st.caption(
+                f"Se muestran todos los periodos simulados ({sim_summary['periods']}). "
+                f"Cada periodo es una evaluación histórica walk-forward usando un horizonte de {selected_horizon_days} días hábiles; "
+                "no representa necesariamente un día calendario individual."
+            )
+            show_readable_dataframe(sim_df.round(3), height=500)
             help_box(
                 "Esta simulación usa señales históricas walk-forward del modelo sobre las emisoras seleccionadas. "
                 "No garantiza resultados futuros y no reconstruye una cartera nueva en cada fecha; sirve como prueba funcional "
-                "para evitar que la recomendación quede solo como una propuesta sin validación."
+                "para evitar que la recomendación quede solo como una propuesta sin validación. "
+                "Antes solo se mostraban los últimos 15 registros; ahora se visualiza la simulación completa para que no parezca que faltan periodos."
             )
