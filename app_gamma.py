@@ -2,6 +2,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 import hashlib
+import html
 import json
 import os
 from pathlib import Path
@@ -1447,31 +1448,147 @@ def help_box(text):
 
 
 def chart_reason_box(chart_name, reason):
-    """Explicación breve, simple y entendible para usuarios no técnicos."""
-    st.caption(f"📌 Para qué sirve: {reason}")
+    """Explicación breve para justificar por qué se usa una gráfica ante usuarios no técnicos."""
+    st.caption(f"📌 Por qué se usa esta visualización: {reason}")
 
 
 def show_readable_dataframe(df, height=None, text_columns=None, hide_index=True):
     """
-    Muestra tablas con columnas de texto amplias para evitar que la explicación quede cortada.
-    Si la versión de Streamlit no soporta column_config, cae al dataframe normal.
+    Muestra tablas sin cortar texto largo, pero sin deformar los encabezados.
+
+    Regla usada:
+    - Los encabezados NO se parten en varias líneas.
+    - Las columnas largas se hacen más anchas.
+    - El texto largo se conserva en una sola línea y se consulta con scroll horizontal.
+    - No se agregan filas ni se inflan los renglones.
     """
-    text_columns = text_columns or []
-    try:
-        column_config = {
-            col: st.column_config.TextColumn(col, width="large")
-            for col in text_columns
-            if col in df.columns
-        }
-        st.dataframe(
-            df,
-            width="stretch",
-            height=height,
-            hide_index=hide_index,
-            column_config=column_config,
-        )
-    except Exception:
-        st.dataframe(df, width="stretch", height=height)
+    text_columns = [c for c in (text_columns or []) if c in df.columns]
+
+    # Para tablas normales se conserva el componente interactivo de Streamlit.
+    if not text_columns:
+        st.dataframe(df, width="stretch", height=height, hide_index=hide_index)
+        return
+
+    df_show = df.copy()
+
+    def _format_cell(value):
+        if pd.isna(value):
+            return "-"
+        if isinstance(value, float):
+            return f"{value:,.3f}".rstrip("0").rstrip(".")
+        if isinstance(value, (int, np.integer)):
+            return f"{int(value):,}"
+        if isinstance(value, pd.Timestamp):
+            return value.strftime("%Y-%m-%d")
+        return str(value)
+
+    def _min_width_for_column(col):
+        col_l = str(col).lower()
+
+        # Columnas explicativas: se expanden para que no se corte el contenido.
+        if col in text_columns:
+            if any(x in col_l for x in ["motivo", "lectura", "detalle", "estratégica", "estrategica"]):
+                return 900
+            return 760
+
+        # Columnas de identificación.
+        if any(x in col_l for x in ["emisora", "escenario", "objetivo"]):
+            return 170
+
+        # Columnas cortas.
+        if any(x in col_l for x in ["señal", "riesgo", "estado", "resultado", "confianza", "acción", "accion"]):
+            return 135
+
+        # Columnas numéricas.
+        if any(x in col_l for x in ["monto", "capital", "precio", "rendimiento", "cambio", "volatilidad", "%"]):
+            return 165
+
+        return 140
+
+    columns = list(df_show.columns)
+    visible_columns = columns if hide_index else [df_show.index.name or "Índice"] + columns
+    col_widths = {col: _min_width_for_column(col) for col in visible_columns}
+
+    colgroup = "".join(
+        f'<col style="min-width:{col_widths[col]}px;">'
+        for col in visible_columns
+    )
+
+    header_html = "".join(
+        f'<th title="{html.escape(str(col))}">{html.escape(str(col))}</th>'
+        for col in visible_columns
+    )
+
+    rows_html = []
+    for idx, row in df_show.iterrows():
+        cells = []
+        if not hide_index:
+            cells.append(f'<td>{html.escape(_format_cell(idx))}</td>')
+        for col in columns:
+            cls = "expanded-text-cell" if col in text_columns else "normal-cell"
+            value = html.escape(_format_cell(row[col]))
+            cells.append(f'<td class="{cls}" title="{value}">{value}</td>')
+        rows_html.append("<tr>" + "".join(cells) + "</tr>")
+
+    max_height_css = f"max-height:{int(height)}px; overflow-y:auto;" if height else ""
+    table_min_width = sum(col_widths.values())
+
+    table_html = f"""
+    <style>
+        .expanded-table-container {{
+            width: 100%;
+            {max_height_css}
+            overflow-x: auto;
+            border: 1px solid rgba(128, 128, 128, 0.35);
+            border-radius: 10px;
+            margin: 0.35rem 0 1rem 0;
+        }}
+        .expanded-table-container table {{
+            min-width: {table_min_width}px;
+            width: max-content;
+            border-collapse: collapse;
+            table-layout: auto;
+            font-size: 0.92rem;
+        }}
+        .expanded-table-container th,
+        .expanded-table-container td {{
+            border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+            border-right: 1px solid rgba(128, 128, 128, 0.18);
+            padding: 0.48rem 0.62rem;
+            vertical-align: middle;
+            line-height: 1.25;
+            white-space: nowrap;
+        }}
+        .expanded-table-container th {{
+            background: rgba(128, 128, 128, 0.16);
+            font-weight: 700;
+            height: 38px;
+            max-width: none;
+            overflow: visible;
+            text-overflow: clip;
+        }}
+        .expanded-table-container td.expanded-text-cell {{
+            min-width: 760px;
+            white-space: nowrap;
+            overflow: visible;
+            text-overflow: clip;
+        }}
+        .expanded-table-container td.normal-cell {{
+            white-space: nowrap;
+        }}
+        .expanded-table-container tr:last-child td {{
+            border-bottom: none;
+        }}
+    </style>
+    <div class="expanded-table-container">
+        <table>
+            <colgroup>{colgroup}</colgroup>
+            <thead><tr>{header_html}</tr></thead>
+            <tbody>{''.join(rows_html)}</tbody>
+        </table>
+    </div>
+    """
+    st.markdown(table_html, unsafe_allow_html=True)
 
 
 PROFILE_UI_STYLES = {
@@ -1992,13 +2109,13 @@ if view == "Inicio":
     st.markdown("## 📘 Conceptos que debes conocer")
     st.caption("No necesitas ser experto. Aquí te explicamos, en palabras sencillas, los términos que verás en el panel.")
 
-    with st.expander("¿Para qué sirve cada gráfica del dashboard?"):
+    with st.expander("¿Por qué se eligieron estas gráficas en el dashboard?"):
         st.markdown(
-            "- **Líneas de precio:** sirven para ver si el precio ha subido, bajado o se ha mantenido parecido con el tiempo.\n"
-            "- **Barras comparativas:** sirven para comparar varias emisoras de un vistazo.\n"
-            "- **Pastel de cartera:** sirve para ver cómo se reparte tu dinero entre las opciones sugeridas y la reserva.\n"
-            "- **Líneas de simulación:** sirven para imaginar cómo habría cambiado tu dinero en pruebas pasadas.\n"
-            "- **Tablas explicativas:** sirven para mostrar detalles que no caben bien en una gráfica."
+            "- **Líneas de precio:** se usan para ver la trayectoria en el tiempo, porque una inversión no se entiende solo con un número final.\n"
+            "- **Barras comparativas:** se usan para comparar porcentajes entre emisoras de forma rápida, por ejemplo acierto del modelo contra volatilidad.\n"
+            "- **Pastel de cartera:** se usa para mostrar visualmente cómo se reparte el dinero entre emisoras y reserva.\n"
+            "- **Líneas de simulación:** se usan para comparar cómo habría cambiado el capital siguiendo el modelo frente a comprar y mantener.\n"
+            "- **Tablas explicativas:** se usan cuando el dato necesita contexto, como validaciones, motivos de elección y niveles de alerta."
         )
 
     with st.expander("¿Qué es el Modelo Gamma?"):
@@ -2102,7 +2219,11 @@ if view == "Inicio":
         )
 
     with st.expander("Definición operativa de los objetivos"):
-        st.dataframe(build_goal_reference_table(selected_horizon_days), width="stretch")
+        show_readable_dataframe(
+            build_goal_reference_table(selected_horizon_days),
+            height=320,
+            text_columns=["Criterio operativo", "Rendimiento mínimo deseable"],
+        )
         st.caption(
             "La referencia de inflación es educativa y sirve para explicar que 'cuidar mi dinero' no significa "
             "solo mantener el mismo número de pesos, sino conservar poder adquisitivo."
@@ -2165,7 +2286,7 @@ elif view == "Vista general":
             st.line_chart(tmp, width="stretch")
             chart_reason_box(
                 "Línea de precios",
-                "te ayuda a ver si el precio ha subido, bajado o se ha mantenido parecido con el tiempo."
+                "permite ver la evolución completa de cada emisora y detectar subidas, caídas o periodos de estabilidad sin depender solo del último precio."
             )
 
             st.markdown("### Resumen comparativo")
@@ -2213,7 +2334,7 @@ elif view == "Entender una emisora":
                 st.plotly_chart(fig, width="stretch")
                 chart_reason_box(
                     "Línea de precio",
-                    "te muestra la historia del precio para entender rápido si viene subiendo, bajando o casi no se ha movido."
+                    "se eligió porque muestra la historia de la emisora en orden temporal y ayuda a explicar si el precio viene subiendo, bajando o moviéndose lateralmente."
                 )
             with c2:
                 ret_1d = y.pct_change().dropna() * 100
@@ -2245,7 +2366,7 @@ elif view == "Entender una emisora":
             st.plotly_chart(fig2, width="stretch")
             chart_reason_box(
                 "Líneas de indicadores",
-                "te ayuda a ver cuándo la emisora se mueve mucho, poco o empieza a mostrar señales de cambio."
+                "se usan porque RSI, posición dentro de banda y volatilidad cambian día con día; verlos como serie temporal facilita detectar momentos de sobrecompra, sobreventa o riesgo elevado."
             )
 
             st.markdown("### Módulo de volatilidad")
@@ -2343,7 +2464,7 @@ elif view == "Pronóstico":
             st.plotly_chart(fig_daily, width="stretch")
             chart_reason_box(
                 "Trayectoria diaria estimada",
-                "muestra una idea día por día de cómo se llegaría al precio estimado."
+                "convierte el pronóstico final en pasos por día hábil, para que el usuario entienda el camino aproximado y no solo vea un precio objetivo aislado."
             )
             help_box(
                 "Esta trayectoria diaria no significa que el precio vaya a moverse exactamente así cada día. "
@@ -2391,7 +2512,7 @@ elif view == "Pronóstico":
             st.plotly_chart(fig_curve, width="stretch")
             chart_reason_box(
                 "Desempeño acumulado",
-                "muestra si la estrategia habría terminado mejor o peor que solo comprar y esperar."
+                "permite comparar de forma visual si el modelo final habría acumulado mejor o peor resultado que comprar y mantener la emisora."
             )
 
             df_price = pd.DataFrame({
@@ -2410,7 +2531,7 @@ elif view == "Pronóstico":
             st.plotly_chart(fig_price, width="stretch")
             chart_reason_box(
                 "Precio real vs precio estimado",
-                "sirve para ver qué tan cerca estuvo el cálculo del precio que realmente pasó."
+                "se eligió para mostrar de manera honesta qué tan cerca quedó la estimación del comportamiento real observado en la prueba histórica."
             )
 
 # ---------- TAB 4 ----------
@@ -2482,7 +2603,7 @@ elif view == "Comparativo":
         st.plotly_chart(fig_top, width="stretch")
         chart_reason_box(
             "Barras comparativas",
-            "sirven para comparar rápido qué emisoras tuvieron más acierto y cuáles se movieron más."
+            "se eligieron porque permiten comparar porcentajes entre emisoras rápidamente; el acierto muestra desempeño histórico del modelo y la volatilidad muestra el riesgo reciente."
         )
 
         help_box(
@@ -2593,7 +2714,7 @@ elif view == "Mi perfil y cartera":
         st.plotly_chart(fig_pie, width="stretch")
         chart_reason_box(
             "Gráfica de pastel",
-            "sirve para ver de forma sencilla qué parte de tu dinero iría a cada opción y cuánto quedaría como reserva."
+            "se eligió porque la cartera es una distribución del 100% del dinero; así se entiende rápido cuánto va a cada emisora y cuánto queda como reserva."
         )
 
         st.markdown("### 5) Por qué se eligieron estas emisoras")
@@ -2712,7 +2833,7 @@ elif view == "Mi perfil y cartera":
             st.plotly_chart(fig_sim, width="stretch")
             chart_reason_box(
                 "Líneas de capital simulado",
-                "muestra cómo habría cambiado tu dinero en el pasado usando la estrategia y comparándolo con solo comprar y esperar."
+                "se eligieron para comparar dos caminos históricos: seguir la estrategia del modelo o comprar y mantener las mismas emisoras."
             )
 
             st.caption(
