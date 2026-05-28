@@ -2,6 +2,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 import hashlib
+import html
 import json
 import os
 from pathlib import Path
@@ -1453,25 +1454,106 @@ def chart_reason_box(chart_name, reason):
 
 def show_readable_dataframe(df, height=None, text_columns=None, hide_index=True):
     """
-    Muestra tablas con columnas de texto amplias para evitar que la explicación quede cortada.
-    Si la versión de Streamlit no soporta column_config, cae al dataframe normal.
+    Muestra tablas legibles.
+
+    Nota importante:
+    st.dataframe no envuelve texto dentro de las celdas; por eso, aunque se use
+    width="stretch" o columnas "large", la última columna puede verse cortada y
+    obligar al usuario a desplazarse horizontalmente. Cuando hay columnas largas
+    se renderiza una tabla HTML con texto envuelto.
     """
-    text_columns = text_columns or []
-    try:
-        column_config = {
-            col: st.column_config.TextColumn(col, width="large")
-            for col in text_columns
-            if col in df.columns
-        }
-        st.dataframe(
-            df,
-            width="stretch",
-            height=height,
-            hide_index=hide_index,
-            column_config=column_config,
-        )
-    except Exception:
-        st.dataframe(df, width="stretch", height=height)
+    text_columns = [c for c in (text_columns or []) if c in df.columns]
+
+    # Si no hay columnas largas, se conserva el dataframe interactivo normal.
+    if not text_columns:
+        st.dataframe(df, width="stretch", height=height, hide_index=hide_index)
+        return
+
+    df_show = df.copy()
+
+    def _format_cell(value):
+        if pd.isna(value):
+            return "-"
+        if isinstance(value, float):
+            return f"{value:,.3f}".rstrip("0").rstrip(".")
+        if isinstance(value, (int, np.integer)):
+            return f"{int(value):,}"
+        if isinstance(value, pd.Timestamp):
+            return value.strftime("%Y-%m-%d")
+        return str(value)
+
+    columns = list(df_show.columns)
+    visible_columns = columns if hide_index else [df_show.index.name or "Índice"] + columns
+
+    text_set = set(text_columns)
+    n_cols = len(visible_columns)
+    n_text = max(1, len(text_columns))
+    text_total_width = 44 if n_cols >= 6 else 52
+    text_width = text_total_width / n_text
+    normal_cols = [c for c in visible_columns if c not in text_set]
+    normal_width = max(7, (100 - text_total_width) / max(1, len(normal_cols)))
+
+    colgroup = "".join(
+        f'<col style="width:{text_width:.2f}%">' if col in text_set
+        else f'<col style="width:{normal_width:.2f}%">'
+        for col in visible_columns
+    )
+
+    header_html = "".join(f"<th>{html.escape(str(col))}</th>" for col in visible_columns)
+    rows_html = []
+    for idx, row in df_show.iterrows():
+        cells = []
+        if not hide_index:
+            cells.append(f"<td>{html.escape(_format_cell(idx))}</td>")
+        for col in columns:
+            cells.append(f"<td>{html.escape(_format_cell(row[col]))}</td>")
+        rows_html.append("<tr>" + "".join(cells) + "</tr>")
+
+    max_height_css = f"max-height:{int(height)}px; overflow-y:auto;" if height else ""
+    table_html = f"""
+    <style>
+        .wrapped-table-container {{
+            width: 100%;
+            {max_height_css}
+            overflow-x: hidden;
+            border: 1px solid rgba(128, 128, 128, 0.35);
+            border-radius: 10px;
+            margin: 0.35rem 0 1rem 0;
+        }}
+        .wrapped-table-container table {{
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+            font-size: 0.88rem;
+        }}
+        .wrapped-table-container th,
+        .wrapped-table-container td {{
+            border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+            border-right: 1px solid rgba(128, 128, 128, 0.18);
+            padding: 0.55rem 0.65rem;
+            vertical-align: top;
+            white-space: normal !important;
+            overflow-wrap: anywhere;
+            word-break: normal;
+            line-height: 1.35;
+        }}
+        .wrapped-table-container th {{
+            background: rgba(128, 128, 128, 0.16);
+            font-weight: 700;
+        }}
+        .wrapped-table-container tr:last-child td {{
+            border-bottom: none;
+        }}
+    </style>
+    <div class="wrapped-table-container">
+        <table>
+            <colgroup>{colgroup}</colgroup>
+            <thead><tr>{header_html}</tr></thead>
+            <tbody>{''.join(rows_html)}</tbody>
+        </table>
+    </div>
+    """
+    st.markdown(table_html, unsafe_allow_html=True)
 
 
 PROFILE_UI_STYLES = {
@@ -2102,7 +2184,11 @@ if view == "Inicio":
         )
 
     with st.expander("Definición operativa de los objetivos"):
-        st.dataframe(build_goal_reference_table(selected_horizon_days), width="stretch")
+        show_readable_dataframe(
+            build_goal_reference_table(selected_horizon_days),
+            height=320,
+            text_columns=["Criterio operativo", "Rendimiento mínimo deseable"],
+        )
         st.caption(
             "La referencia de inflación es educativa y sirve para explicar que 'cuidar mi dinero' no significa "
             "solo mantener el mismo número de pesos, sino conservar poder adquisitivo."
