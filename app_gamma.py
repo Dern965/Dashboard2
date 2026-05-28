@@ -1454,13 +1454,13 @@ def chart_reason_box(chart_name, reason):
 
 def show_readable_dataframe(df, height=None, text_columns=None, hide_index=True):
     """
-    Muestra tablas legibles.
+    Muestra tablas legibles sin deformar el encabezado.
 
-    Nota importante:
-    st.dataframe no envuelve texto dentro de las celdas; por eso, aunque se use
-    width="stretch" o columnas "large", la última columna puede verse cortada y
-    obligar al usuario a desplazarse horizontalmente. Cuando hay columnas largas
-    se renderiza una tabla HTML con texto envuelto.
+    Ajuste clave:
+    - El encabezado queda en una sola línea para que no se haga enorme.
+    - Solo las columnas de texto largo envuelven contenido dentro de la celda.
+    - Si la tabla tiene muchas columnas, se permite scroll horizontal suave,
+      pero el texto largo ya no queda cortado dentro de la última columna.
     """
     text_columns = [c for c in (text_columns or []) if c in df.columns]
 
@@ -1482,31 +1482,46 @@ def show_readable_dataframe(df, height=None, text_columns=None, hide_index=True)
             return value.strftime("%Y-%m-%d")
         return str(value)
 
+    def _width_for_column(col):
+        col_l = str(col).lower()
+        if col in text_columns:
+            return 520
+        if "emisora" in col_l or "escenario" in col_l or "objetivo" in col_l:
+            return 150
+        if "señal" in col_l or "riesgo" in col_l or "estado" in col_l or "resultado" in col_l:
+            return 110
+        if "confianza" in col_l or "acción" in col_l or "aspecto" in col_l:
+            return 135
+        if "monto" in col_l or "capital" in col_l or "precio" in col_l:
+            return 135
+        if "%" in col_l or "volatilidad" in col_l or "rendimiento" in col_l or "cambio" in col_l:
+            return 145
+        return 125
+
     columns = list(df_show.columns)
     visible_columns = columns if hide_index else [df_show.index.name or "Índice"] + columns
-
-    text_set = set(text_columns)
-    n_cols = len(visible_columns)
-    n_text = max(1, len(text_columns))
-    text_total_width = 44 if n_cols >= 6 else 52
-    text_width = text_total_width / n_text
-    normal_cols = [c for c in visible_columns if c not in text_set]
-    normal_width = max(7, (100 - text_total_width) / max(1, len(normal_cols)))
+    widths = {col: _width_for_column(col) for col in visible_columns}
+    total_width = sum(widths.values())
+    table_min_width = max(900, total_width)
 
     colgroup = "".join(
-        f'<col style="width:{text_width:.2f}%">' if col in text_set
-        else f'<col style="width:{normal_width:.2f}%">'
+        f'<col style="width:{widths[col]}px; min-width:{widths[col]}px;">'
         for col in visible_columns
     )
 
-    header_html = "".join(f"<th>{html.escape(str(col))}</th>" for col in visible_columns)
+    header_html = "".join(
+        f'<th title="{html.escape(str(col))}">{html.escape(str(col))}</th>'
+        for col in visible_columns
+    )
+
     rows_html = []
     for idx, row in df_show.iterrows():
         cells = []
         if not hide_index:
-            cells.append(f"<td>{html.escape(_format_cell(idx))}</td>")
+            cells.append(f'<td class="nowrap-cell">{html.escape(_format_cell(idx))}</td>')
         for col in columns:
-            cells.append(f"<td>{html.escape(_format_cell(row[col]))}</td>")
+            cell_class = "text-cell" if col in text_columns else "nowrap-cell"
+            cells.append(f'<td class="{cell_class}">{html.escape(_format_cell(row[col]))}</td>')
         rows_html.append("<tr>" + "".join(cells) + "</tr>")
 
     max_height_css = f"max-height:{int(height)}px; overflow-y:auto;" if height else ""
@@ -1515,31 +1530,43 @@ def show_readable_dataframe(df, height=None, text_columns=None, hide_index=True)
         .wrapped-table-container {{
             width: 100%;
             {max_height_css}
-            overflow-x: hidden;
+            overflow-x: auto;
             border: 1px solid rgba(128, 128, 128, 0.35);
             border-radius: 10px;
             margin: 0.35rem 0 1rem 0;
         }}
         .wrapped-table-container table {{
             width: 100%;
+            min-width: {table_min_width}px;
             border-collapse: collapse;
             table-layout: fixed;
-            font-size: 0.88rem;
+            font-size: 0.92rem;
         }}
         .wrapped-table-container th,
         .wrapped-table-container td {{
             border-bottom: 1px solid rgba(128, 128, 128, 0.25);
             border-right: 1px solid rgba(128, 128, 128, 0.18);
-            padding: 0.55rem 0.65rem;
+            padding: 0.48rem 0.62rem;
             vertical-align: top;
-            white-space: normal !important;
-            overflow-wrap: anywhere;
-            word-break: normal;
-            line-height: 1.35;
+            line-height: 1.32;
         }}
         .wrapped-table-container th {{
             background: rgba(128, 128, 128, 0.16);
             font-weight: 700;
+            white-space: nowrap !important;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            height: 38px;
+        }}
+        .wrapped-table-container td.nowrap-cell {{
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }}
+        .wrapped-table-container td.text-cell {{
+            white-space: normal !important;
+            overflow-wrap: break-word;
+            word-break: normal;
         }}
         .wrapped-table-container tr:last-child td {{
             border-bottom: none;
