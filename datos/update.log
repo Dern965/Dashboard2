@@ -9138,3 +9138,88 @@
 2026-08-13 14:35:56,463 [INFO]   Tickers con error:    1
 2026-08-13 14:35:56,463 [INFO]   Filas nuevas totales: 33
 2026-08-13 14:35:56,463 [INFO] ──────────────────────────────────────────────────
+2026-08-14 14:29:00,361 [INFO] ============================================================
+2026-08-14 14:29:00,361 [INFO]   ACTUALIZACIÓN DIARIA DE DATOS — 2026-08-14 14:29 UTC
+2026-08-14 14:29:00,362 [INFO] ============================================================
+2026-08-14 14:29:00,362 [INFO] Leyendo CSV existente: datos/market_prices.csv
+2026-08-14 14:29:00,508 [INFO] Tickers detectados: 34
+2026-08-14 14:29:00,525 [INFO] Fecha hoy (CDMX): 2026-08-14
+2026-08-14 14:29:00,526 [INFO]   [AC_MX] Descargando desde 2026-08-14 → AC.MX
+2026-08-14 14:29:01,182 [INFO]   [AC_MX] +1 filas nuevas ✓
+2026-08-14 14:29:01,983 [INFO]   [ALPEKA_MX] Descargando desde 2026-08-14 → ALPEKA.MX
+2026-08-14 14:29:02,375 [INFO]   [ALPEKA_MX] +1 filas nuevas ✓
+2026-08-14 14:29:03,175 [INFO]   [ALSEA_MX] Descargando desde 2026-08-14 → ALSEA.MX
+2026-08-14 14:29:03,508 [INFO]   [ALSEA_MX] +1 filas nuevas ✓
+2026-08-14 14:29:04,308 [INFO]   [AMXB_MX] Descargando desde 2026-08-14 → AMXB.MX
+2026-08-14 14:29:04,568 [INFO]   [AMXB_MX] +1 filas nuevas ✓
+2026-08-14 14:29:05,369 [INFO]   [ASURB_MX] Descargando desde 2026-08-14 → ASURB.MX
+2026-08-14 14:29:05,634 [INFO]   [ASURB_MX] +1 filas nuevas ✓
+2026-08-14 14:29:06,435 [INFO]   [BBAJIOO_MX] Descargando desde 2026-08-14 → BBAJIOO.MX
+2026-08-14 14:29:06,669 [INFO]   [BBAJIOO_MX] +1 filas nuevas ✓
+2026-08-14 14:29:07,469 [INFO]   [BIMBOA_MX] Descargando desde 2026-08-14 → BIMBOA.MX
+2026-08-14 14:29:07,736 [INFO]   [BIMBOA_MX] +1 filas nuevas ✓
+2026-08-14 14:29:08,536 [INFO]   [BOLSAA_MX] Descargando desde 2026-08-14 → BOLSAA.MX
+2026-08-14 14:29:08,861 [INFO]   [BOLSAA_MX] +1 filas nuevas ✓
+2026-08-14 14:29:09,661 [INFO]   [CEMEXCPO_MX] Descargando desde 2026-08-14 → CEMEXCPO.MX
+2026-08-14 14:29:09,994 [INFO]   [CEMEXCPO_MX] +1 filas nuevas ✓
+2026-08-14 14:29:10,795 [INFO]   [CUERVO_MX] Descargando desde 2026-08-14 → CUERVO.MX
+2026-08-14 14:29:11,050 [INFO]   [CUERVO_MX] +1 filas nuevas ✓
+2026-08-14 14:29:11,851 [INFO]   [ELEKTRA_MX] Descargando desde 2026-04-28 → ELEKTRA.MX
+2026-08-14 14:29:12,443 [ERROR] HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"Quote not found for symbol: ELEKTRA.MX"}}}
+2026-08-14 14:29:12,587 [ERROR] $ELEKTRA.MX: possibly delisted; no timezone found
+2026-08-14 14:29:12,587 [WARNING]   [ELEKTRA_MX] Sin datos nuevos
+2026-08-14 14:29:13,388 [INFO]   [FEMSAUBD_MX] Descargando desde 2026-08-14 → FEMSAUBD.MX
+2026-08-14 14:29:13,654 [INFO]   [FEMSAUBD_MX] +1 filas nuevas ✓
+2026-08-14 14:29:14,455 [INFO]   [GAPB_MX] Descargando desde 2026-08-14 → GAPB.MX
+2026-08-14 14:29:14,718 [INFO]   [GAPB_MX] +1 filas nuevas ✓
+2026-08-14 14:29:15,518 [INFO]   [GCARSOA1_MX] Descargando desde 2026-08-14 → GCARSOA1.MX
+2026-08-14 14:29:15,826 [INFO]   [GCARSOA1_MX] +1 filas nuevas ✓
+2026-08-14 14:29:16,627 [INFO]   [GCC_MX] Descargando desde 2026-08-14 → GCC.MX
+2026-08-14 14:29:16,890 [INFO]   [GCC_MX] +1 filas nuevas ✓
+2026-08-14 14:29:17,691 [INFO]   [GFINBURO_MX] Descargando desde 2026-08-14 → GFINBURO.MX
+2026-08-14 14:29:17,942 [INFO]   [GFINBURO_MX] +1 filas nuevas ✓
+2026-08-14 14:29:18,742 [INFO]   [GFNORTEO_MX] Descargando desde 2026-08-14 → GFNORTEO.MX
+2026-08-14 14:29:19,002 [INFO]   [GFNORTEO_MX] +1 filas nuevas ✓
+2026-08-14 14:29:19,802 [INFO]   [GMEXICOB_MX] Descargando desde 2026-08-14 → GMEXICOB.MX
+2026-08-14 14:29:20,090 [INFO]   [GMEXICOB_MX] +1 filas nuevas ✓
+2026-08-14 14:29:20,891 [INFO]   [GRUMAB_MX] Descargando desde 2026-08-14 → GRUMAB.MX
+2026-08-14 14:29:21,182 [INFO]   [GRUMAB_MX] +1 filas nuevas ✓
+2026-08-14 14:29:21,982 [INFO]   [KIMBERA_MX] Descargando desde 2026-08-14 → KIMBERA.MX
+2026-08-14 14:29:22,365 [INFO]   [KIMBERA_MX] +1 filas nuevas ✓
+2026-08-14 14:29:23,165 [INFO]   [KOFUBL_MX] Descargando desde 2026-08-14 → KOFUBL.MX
+2026-08-14 14:29:23,408 [INFO]   [KOFUBL_MX] +1 filas nuevas ✓
+2026-08-14 14:29:24,208 [INFO]   [LABB_MX] Descargando desde 2026-08-14 → LABB.MX
+2026-08-14 14:29:24,450 [INFO]   [LABB_MX] +1 filas nuevas ✓
+2026-08-14 14:29:25,250 [INFO]   [LIVEPOLC-1_MX] Descargando desde 2026-08-14 → LIVEPOLC-1.MX
+2026-08-14 14:29:25,520 [INFO]   [LIVEPOLC-1_MX] +1 filas nuevas ✓
+2026-08-14 14:29:26,321 [INFO]   [MEGACPO_MX] Descargando desde 2026-08-14 → MEGACPO.MX
+2026-08-14 14:29:26,706 [INFO]   [MEGACPO_MX] +1 filas nuevas ✓
+2026-08-14 14:29:27,506 [INFO]   [OMAB_MX] Descargando desde 2026-08-14 → OMAB.MX
+2026-08-14 14:29:27,879 [INFO]   [OMAB_MX] +1 filas nuevas ✓
+2026-08-14 14:29:28,680 [INFO]   [ORBIA_MX] Descargando desde 2026-08-14 → ORBIA.MX
+2026-08-14 14:29:28,941 [INFO]   [ORBIA_MX] +1 filas nuevas ✓
+2026-08-14 14:29:29,741 [INFO]   [PE&OLES_MX] Descargando desde 2026-08-14 → PE&OLES.MX
+2026-08-14 14:29:30,018 [INFO]   [PE&OLES_MX] +1 filas nuevas ✓
+2026-08-14 14:29:30,819 [INFO]   [PINFRAL_MX] Descargando desde 2026-08-13 → PINFRAL.MX
+2026-08-14 14:29:31,057 [INFO]   [PINFRAL_MX] +1 filas nuevas ✓
+2026-08-14 14:29:31,857 [INFO]   [Q_MX] Descargando desde 2026-08-14 → Q.MX
+2026-08-14 14:29:32,104 [INFO]   [Q_MX] +1 filas nuevas ✓
+2026-08-14 14:29:32,904 [INFO]   [RA_MX] Descargando desde 2026-08-14 → RA.MX
+2026-08-14 14:29:33,301 [INFO]   [RA_MX] +1 filas nuevas ✓
+2026-08-14 14:29:34,101 [INFO]   [TLEVISACPO_MX] Descargando desde 2026-08-14 → TLEVISACPO.MX
+2026-08-14 14:29:34,421 [INFO]   [TLEVISACPO_MX] +1 filas nuevas ✓
+2026-08-14 14:29:35,221 [INFO]   [VESTA_MX] Descargando desde 2026-08-14 → VESTA.MX
+2026-08-14 14:29:35,461 [INFO]   [VESTA_MX] +1 filas nuevas ✓
+2026-08-14 14:29:36,261 [INFO]   [VOLARA_MX] Descargando desde 2026-08-14 → VOLARA.MX
+2026-08-14 14:29:36,487 [INFO]   [VOLARA_MX] +1 filas nuevas ✓
+2026-08-14 14:29:37,288 [INFO]   [WALMEX_MX] Descargando desde 2026-08-14 → WALMEX.MX
+2026-08-14 14:29:37,528 [INFO]   [WALMEX_MX] +1 filas nuevas ✓
+2026-08-14 14:29:39,127 [INFO] 
+✅ CSV actualizado: datos/market_prices.csv  (182,929 filas totales, +33 nuevas)
+2026-08-14 14:29:39,129 [INFO] 
+── Resumen ──────────────────────────────────────
+2026-08-14 14:29:39,129 [INFO]   Tickers actualizados: 33
+2026-08-14 14:29:39,129 [INFO]   Tickers sin cambios:  0
+2026-08-14 14:29:39,129 [INFO]   Tickers con error:    1
+2026-08-14 14:29:39,129 [INFO]   Filas nuevas totales: 33
+2026-08-14 14:29:39,129 [INFO] ──────────────────────────────────────────────────
